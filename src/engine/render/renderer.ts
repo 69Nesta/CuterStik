@@ -47,8 +47,8 @@ export class Renderer {
 
         this.scene.background = new THREE.Color('#72b6ff')
 
-        if (this.debug.active) {
-            this.debugFolder?.addColor(this.scene, 'background').name('Background')
+        if (this.debugFolder) {
+            this.debugFolder.addColor(this.scene, 'background').name('Background')
         }
     }
 
@@ -59,5 +59,9 @@ export class Renderer {
 
     update() {
         this.instance.render(this.scene, this.camera.instance)
+    }
+
+    destroy() {
+        this.debugFolder?.destroy()
     }
 }
