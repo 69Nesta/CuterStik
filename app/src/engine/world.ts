@@ -20,11 +20,6 @@ export class World {
 
     map: Map<string, THREE.Mesh> = new Map();
 
-    // player references for input-driven movement
-    playerMesh: THREE.Mesh | undefined;
-    playerBody: RAPIER.RigidBody | undefined;
-    // private _tickHandler?: () => void;
-
     constructor() {
         this.engine = new Engine()
         this.scene = this.engine.scene
@@ -41,10 +36,6 @@ export class World {
 
         this.setup_environement()
         this.setup_map()
-        // this.test_box()
-
-        // this._tickHandler = this.tick.bind(this)
-        // this.engine.time.on('tick', this._tickHandler)
     }
 
 
@@ -118,67 +109,7 @@ export class World {
         }
     }
 
-    test_box() {
-        const capsule = new THREE.Mesh(
-			new THREE.CapsuleGeometry(0.5, 1.8, 4, 8),
-			new THREE.MeshStandardMaterial({ color: '#00ff00', wireframe: true })
-		)
-		capsule.position.set(0, 1.4, 0)
-		this.scene.add(capsule)
-
-        const capsuleBody = this.world.createRigidBody(
-			RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 1.4, 0).setSleeping(false)
-		)
-		// lock rotation on the X and Z axis
-
-        // 70kg = 686N
-		capsuleBody.lockRotations(true, false)
-		const capsuleShape = RAPIER.ColliderDesc.capsule(0.5, 0.9).setMass(1).setRestitution(0)
-		
-        this.world.createCollider(capsuleShape, capsuleBody)
-        this.physics.register(capsule, capsuleBody)
-
-        // store player references so tick can control movement
-        this.playerMesh = capsule
-        this.playerBody = capsuleBody
-    }
-
     destroy() {
         this.debugFolder?.destroy()
-        // stop input and tick handler
-        // this.engine.time.off('tick')
     }
-
-    // called every frame (registered early so movement is applied before physics.step)
-    // tick() {
-        // if (!this.playerBody) return
-
-        // const dir = this.input.getMovementDirection()
-
-        // // debug: log input dir so you can see it's captured
-        // if (Math.abs(dir.x) > 0 || Math.abs(dir.z) > 0 || Math.abs(dir.y) > 0) {
-        //     // eslint-disable-next-line no-console
-        //     console.log('[Input] dir=', dir)
-        // }
-
-        // // configurable speed (units per second)
-        // const speed = 5
-        // const jumpImpulse = 5
-        // // const verticalSpeed = 5
-
-        // // get current velocity and preserve vertical (y)
-        // const currentVel = this.playerBody.linvel()
-        // const newVel = { x: dir.x * speed, y: currentVel.y, z: dir.z * speed }
-        // this.playerBody.setLinvel(newVel, true)
-        
-        // // apply the new horizontal velocity
-        // // console.log(y)
-        // if (dir.y > 0 && Math.abs(currentVel.y) < 0.01) {
-        //     this.playerBody.applyImpulse({ x: 0, y: jumpImpulse, z: 0 }, true)
-        // }
-
-        // debug: log velocities occasionally
-        // eslint-disable-next-line no-console
-        // console.log('[Physics] linvel=', this.playerBody.linvel())
-    // }
 }
