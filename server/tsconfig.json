@@ -24,6 +24,14 @@
     // Some stricter flags (disabled by default)
     "noUnusedLocals": false,
     "noUnusedParameters": false,
-    "noPropertyAccessFromIndexSignature": false
+    "noPropertyAccessFromIndexSignature": false,
+
+    // Custom Imports
+    "paths": {
+      "@packets/*": ["./src/packets/*"],
+      "@game/*": ["./src/game/*"],
+      "@ws/*": ["./src/ws/*"],
+      "@/*": ["./src/*"]
+    }
   }
 }
