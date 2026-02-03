@@ -6,6 +6,7 @@ import * as RAPIER from '@dimforge/rapier3d';
 
 import { type GUI } from 'lil-gui';
 import type { Physics } from './physics';
+import { Input } from '@engine/input.ts';
 
 export class World {
     engine: Engine;
@@ -15,8 +16,14 @@ export class World {
     physics: Physics;
     world: RAPIER.World;
     debugFolder: GUI | undefined;
+    input: Input;
 
-    floor: THREE.Mesh | undefined;
+    map: Map<string, THREE.Mesh> = new Map();
+
+    // player references for input-driven movement
+    playerMesh: THREE.Mesh | undefined;
+    playerBody: RAPIER.RigidBody | undefined;
+    // private _tickHandler?: () => void;
 
     constructor() {
         this.engine = new Engine()
@@ -25,6 +32,7 @@ export class World {
         this.debug = this.engine.debug
         this.physics = this.engine.physics
         this.world = this.physics.world
+        this.input = this.engine.input
 
 
         if (this.debug.active) {
@@ -32,8 +40,11 @@ export class World {
         }
 
         this.setup_environement()
-        this.setup_floor()
-        this.test_box()
+        this.setup_map()
+        // this.test_box()
+
+        // this._tickHandler = this.tick.bind(this)
+        // this.engine.time.on('tick', this._tickHandler)
     }
 
 
@@ -45,102 +56,129 @@ export class World {
 		this.scene.add(light);
 	}
 
-    setup_floor() {
-        this.floor = new THREE.Mesh(
+    setup_map() {
+        const floor = new THREE.Mesh(
             new THREE.PlaneGeometry(20, 20),
             new THREE.MeshStandardMaterial({ color: '#777777', wireframe: true })
         )
-        this.floor.rotation.x = - Math.PI / 2
-        this.floor.receiveShadow = true
-        this.scene.add(this.floor)
+        floor.rotation.x = - Math.PI / 2
+        floor.receiveShadow = true
+        this.scene.add(floor)
+        this.map.set('floor', floor)
 
         const floorBody = this.world.createRigidBody(
             RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0)
         )
-        const floorShape = RAPIER.ColliderDesc.cuboid(10, 0, 10)
+        const floorShape = RAPIER.ColliderDesc.cuboid(10, 0, 10).setRestitution(0)
         this.world.createCollider(floorShape, floorBody)
 
-        if (this.debugFolder) {
-            this.debugFolder
-                .add((this.floor.material as THREE.MeshStandardMaterial), 'wireframe')
-                .name('floorWireframe')
-            this.debugFolder
-                .addColor((this.floor.material as THREE.MeshStandardMaterial), 'color')
-                .name('floorColor')
-        }
-    }
-
-    test_box() {
-		const capsule = new THREE.Mesh(
-			new THREE.CapsuleGeometry(0.5, 1.8, 4, 8),
-			new THREE.MeshStandardMaterial({ color: '#00ff00', wireframe: true })
-		)
-		capsule.position.set(0, 5, 0)
-		this.scene.add(capsule)
-
-		const capsuleBody = this.world.createRigidBody(
-			RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 5, 0)
-		)
-		// lock rotation on the X and Z axis
-		capsuleBody.lockRotations(true, false)
-		const capsuleShape = RAPIER.ColliderDesc.capsule(0.5, 0.9).setMass(1).setRestitution(0.6)
-		
-
-		this.world.createCollider(capsuleShape, capsuleBody)
-		this.physics.register(capsule, capsuleBody)
-
-		const geometry = new THREE.BufferGeometry();
-		// create a simple square shape. We duplicate the top left and bottom right
-		// vertices because each vertex needs to appear once per triangle.
-		const ramp = new Float32Array( [
-			-2.0, 0.0, -2.0,
-			 2.0, 0.0, -2.0,
-			 2.0, 2.0,  2.0,
-			-2.0, 0.0, -2.0,
-			 2.0, 2.0,  2.0,
-			-2.0, 2.0,  2.0,
+        const rampGeometry = new THREE.BufferGeometry();
+		const rampAttriutes = new Float32Array( [
+			-5.0, 0.0, -2.0,
+			 5.0, 0.0, -2.0,
+			 5.0, 3.0,  5.0,
+			-5.0, 0.0, -2.0,
+			 5.0, 3.0,  5.0,
+			-5.0, 3.0,  5.0,
 		] );
-		geometry.setAttribute( 'position', new THREE.BufferAttribute( ramp, 3 ) );
-		geometry.computeVertexNormals(); 
-		const material = new THREE.MeshStandardMaterial( { color: '#0000ff', wireframe: true } );
-		const mesh = new THREE.Mesh( geometry, material );
-		mesh.position.set(0, 0, 10)
-		mesh.receiveShadow = true
-		this.scene.add(mesh)
+		rampGeometry.setAttribute('position', new THREE.BufferAttribute(rampAttriutes, 3));
+		rampGeometry.computeVertexNormals(); 
+
+		const rampMesh = new THREE.Mesh(
+            rampGeometry,
+            new THREE.MeshStandardMaterial({ color: '#0000ff', wireframe: true, side: THREE.DoubleSide })
+        );
+		rampMesh.position.set(0, 0, 10)
+		rampMesh.receiveShadow = true
+		this.scene.add(rampMesh)
 
 		const rampBody = this.world.createRigidBody(
 			RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 10)
 		)
-		const rampPoints = new Float32Array(mesh.geometry.attributes.position!.array)
-		const icosahedronShape = (RAPIER.ColliderDesc.convexHull(rampPoints) as RAPIER.ColliderDesc).setFriction(1)
+		const rampPoints = new Float32Array(rampMesh.geometry.attributes.position!.array)
+		const icosahedronShape = (RAPIER.ColliderDesc.convexHull(rampPoints) as RAPIER.ColliderDesc)
+            .setFriction(1)
+            .setRestitution(0) 
 		this.world.createCollider(icosahedronShape, rampBody)
 
-        // const box = new THREE.Mesh(
-        //     new THREE.BoxGeometry(1, 1, 1),
-        //     new THREE.MeshStandardMaterial({ color: '#ff0000', wireframe: true })
-        // )
-        // this.scene.add(box)
+        if (this.debugFolder) {
+            this.debugFolder
+                .add((floor.material as THREE.MeshStandardMaterial), 'wireframe')
+                .name('floorWireframe')
+            this.debugFolder
+                .addColor((floor.material as THREE.MeshStandardMaterial), 'color')
+                .name('floorColor')
 
-        // const cubeBody = this.world.createRigidBody(
-        //     RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 5, 0)
-        // )
-        // const cubeShape = RAPIER.ColliderDesc.cuboid(0.5, 0.5, 0.5).setMass(1).setRestitution(0.6)
-        // this.world.createCollider(cubeShape, cubeBody)
-        // this.physics.register(box, cubeBody)
-        
-        // if (this.debugFolder)
-        //     this.debugFolder.addColor((box.material as THREE.MeshStandardMaterial), 'color')
+            this.debugFolder
+                .add((rampMesh.material as THREE.MeshStandardMaterial), 'wireframe')
+                .name('rampWireframe')
+            this.debugFolder
+                .addColor((rampMesh.material as THREE.MeshStandardMaterial), 'color')
+                .name('rampColor')
+        }
+    }
 
-		setTimeout(() => {
-			capsuleBody.applyImpulse({ x: 0, y: 0, z: 12 }, true)
-		}, 2000)
+    test_box() {
+        const capsule = new THREE.Mesh(
+			new THREE.CapsuleGeometry(0.5, 1.8, 4, 8),
+			new THREE.MeshStandardMaterial({ color: '#00ff00', wireframe: true })
+		)
+		capsule.position.set(0, 1.4, 0)
+		this.scene.add(capsule)
 
-		// setTimeout(() => {
-		// 	capsuleBody.applyImpulse({ x: 0, y: 0, z: 5 }, true)
-		// }, 3000)
+        const capsuleBody = this.world.createRigidBody(
+			RAPIER.RigidBodyDesc.dynamic().setTranslation(0, 1.4, 0).setSleeping(false)
+		)
+		// lock rotation on the X and Z axis
+
+        // 70kg = 686N
+		capsuleBody.lockRotations(true, false)
+		const capsuleShape = RAPIER.ColliderDesc.capsule(0.5, 0.9).setMass(1).setRestitution(0)
+		
+        this.world.createCollider(capsuleShape, capsuleBody)
+        this.physics.register(capsule, capsuleBody)
+
+        // store player references so tick can control movement
+        this.playerMesh = capsule
+        this.playerBody = capsuleBody
     }
 
     destroy() {
         this.debugFolder?.destroy()
+        // stop input and tick handler
+        // this.engine.time.off('tick')
     }
+
+    // called every frame (registered early so movement is applied before physics.step)
+    // tick() {
+        // if (!this.playerBody) return
+
+        // const dir = this.input.getMovementDirection()
+
+        // // debug: log input dir so you can see it's captured
+        // if (Math.abs(dir.x) > 0 || Math.abs(dir.z) > 0 || Math.abs(dir.y) > 0) {
+        //     // eslint-disable-next-line no-console
+        //     console.log('[Input] dir=', dir)
+        // }
+
+        // // configurable speed (units per second)
+        // const speed = 5
+        // const jumpImpulse = 5
+        // // const verticalSpeed = 5
+
+        // // get current velocity and preserve vertical (y)
+        // const currentVel = this.playerBody.linvel()
+        // const newVel = { x: dir.x * speed, y: currentVel.y, z: dir.z * speed }
+        // this.playerBody.setLinvel(newVel, true)
+        
+        // // apply the new horizontal velocity
+        // // console.log(y)
+        // if (dir.y > 0 && Math.abs(currentVel.y) < 0.01) {
+        //     this.playerBody.applyImpulse({ x: 0, y: jumpImpulse, z: 0 }, true)
+        // }
+
+        // debug: log velocities occasionally
+        // eslint-disable-next-line no-console
+        // console.log('[Physics] linvel=', this.playerBody.linvel())
+    // }
 }

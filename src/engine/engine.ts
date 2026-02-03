@@ -7,6 +7,8 @@ import { Camera } from '@engine/render/camera.ts';
 import { Renderer } from '@engine/render/renderer.ts';
 import { World } from '@engine/world.ts'
 import { Physics } from '@engine/physics.ts';
+import { Input } from '@engine/input.ts';
+import { Player } from './entities/player';
 
 
 export class Engine {
@@ -15,11 +17,13 @@ export class Engine {
     public debug!: Debug;
     public sizes!: Sizes;
     public time!: Time;
+    public input!: Input;
     public scene!: Scene;
     public world!: World;
     public physics!: Physics;
     public camera!: Camera;
     public renderer!: Renderer;
+    public player!: Player;
 
     public debugObject!: { printCameraCoords?: () => void };
 
@@ -35,10 +39,14 @@ export class Engine {
         this.debug = new Debug();
         this.sizes = new Sizes();
         this.time = new Time();
+        this.input = new Input();
+        this.input.start();
         this.scene = new Scene();
         this.physics = new Physics();
         this.world = new World();
         this.camera = new Camera();
+        this.player = new Player('Bot', 100);
+
         // this.raycaster = new Raycaster();
 
 
@@ -65,6 +73,8 @@ export class Engine {
     }
 
     update() {
+        this.player.update_player(this.input.getMovementDirection())
+
         this.physics.update(this.time.delta / 1000)
 
         this.camera.update()
@@ -79,6 +89,7 @@ export class Engine {
         this.world.destroy()
         this.scene.clear()
         this.physics.destroy()
+        this.input.stop();
 
         
         if (this.debug.active) {
