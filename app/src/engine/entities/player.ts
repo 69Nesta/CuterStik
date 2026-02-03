@@ -65,7 +65,7 @@ class Player {
 		// lock rotation on the X and Z axis
 		capsuleBody.lockRotations(true, false)
 		const capsuleShape = RAPIER.ColliderDesc
-								.capsule(0.5, 0.9)
+								.capsule(0.9, 0.5)
 								.setMass(1)
 								.setRestitution(0)
 
@@ -104,6 +104,7 @@ class Player {
 
         const currentVel = this.playerBody.linvel()
         const newVel = { x: x * this.SPEED, y: currentVel.y, z: z * this.SPEED }
+
         this.playerBody.setLinvel(newVel, true)
 
 		// jump impulse

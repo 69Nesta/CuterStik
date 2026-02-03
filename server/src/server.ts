@@ -2,11 +2,8 @@ import Bun from 'bun';
 import { Client } from '@ws/client';
 import type { WebSocketData } from '@ws/types';
 
-// type t_ws = Bun.ServerWebSocket<{ data?: Client }>;
-
-
-
 Bun.serve({
+	port: 8080,
 	fetch(req, server) {
 		return new Response("FPS Server");
 	},

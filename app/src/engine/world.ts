@@ -49,7 +49,7 @@ export class World {
 
     setup_map() {
         const floor = new THREE.Mesh(
-            new THREE.PlaneGeometry(20, 20),
+            new THREE.PlaneGeometry(40, 40),
             new THREE.MeshStandardMaterial({ color: '#777777', wireframe: true })
         )
         floor.rotation.x = - Math.PI / 2
@@ -60,37 +60,33 @@ export class World {
         const floorBody = this.world.createRigidBody(
             RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 0)
         )
-        const floorShape = RAPIER.ColliderDesc.cuboid(10, 0, 10).setRestitution(0)
+        const floorShape = RAPIER.ColliderDesc.cuboid(20, 0, 20).setRestitution(0)
         this.world.createCollider(floorShape, floorBody)
 
-        const rampGeometry = new THREE.BufferGeometry();
-		const rampAttriutes = new Float32Array( [
-			-5.0, 0.0, -2.0,
-			 5.0, 0.0, -2.0,
-			 5.0, 3.0,  5.0,
-			-5.0, 0.0, -2.0,
-			 5.0, 3.0,  5.0,
-			-5.0, 3.0,  5.0,
-		] );
-		rampGeometry.setAttribute('position', new THREE.BufferAttribute(rampAttriutes, 3));
-		rampGeometry.computeVertexNormals(); 
+        const firstBox = this.createBox(
+            new THREE.Vector3(0, 0.5, 7.5),
+            new THREE.Vector3(10, 1, 5),
+            '#0000ff',
+            'fixed'
+        )
 
-		const rampMesh = new THREE.Mesh(
-            rampGeometry,
-            new THREE.MeshStandardMaterial({ color: '#0000ff', wireframe: true, side: THREE.DoubleSide })
-        );
-		rampMesh.position.set(0, 0, 10)
-		rampMesh.receiveShadow = true
-		this.scene.add(rampMesh)
+        const secondBox = this.createBox(
+            new THREE.Vector3(-7.5, 1, 5),
+            new THREE.Vector3(5, 2, 10),
+            '#23f208',
+            'fixed'
+        )
 
-		const rampBody = this.world.createRigidBody(
-			RAPIER.RigidBodyDesc.fixed().setTranslation(0, 0, 10)
-		)
-		const rampPoints = new Float32Array(rampMesh.geometry.attributes.position!.array)
-		const icosahedronShape = (RAPIER.ColliderDesc.convexHull(rampPoints) as RAPIER.ColliderDesc)
-            .setFriction(1)
-            .setRestitution(0) 
-		this.world.createCollider(icosahedronShape, rampBody)
+        const thirdBox = this.createBox(
+            new THREE.Vector3(-7.5, 1.5, -2.5),
+            new THREE.Vector3(5, 3, 5),
+            '#f20808',
+            'fixed'
+        )
+
+        this.map.set('firstBox', firstBox.mesh)
+        this.map.set('secondBox', secondBox.mesh)
+        this.map.set('thirdBox', thirdBox.mesh)
 
         if (this.debugFolder) {
             this.debugFolder
@@ -99,14 +95,30 @@ export class World {
             this.debugFolder
                 .addColor((floor.material as THREE.MeshStandardMaterial), 'color')
                 .name('floorColor')
-
-            this.debugFolder
-                .add((rampMesh.material as THREE.MeshStandardMaterial), 'wireframe')
-                .name('rampWireframe')
-            this.debugFolder
-                .addColor((rampMesh.material as THREE.MeshStandardMaterial), 'color')
-                .name('rampColor')
         }
+    }
+
+    createBox(position: THREE.Vector3, size: THREE.Vector3, color: string, bodyType: 'dynamic' | 'fixed' = 'dynamic') {
+        const boxMesh = new THREE.Mesh(
+            new THREE.BoxGeometry(size.x, size.y, size.z),
+            new THREE.MeshStandardMaterial({ color: color, wireframe: true } )
+        );
+        boxMesh.position.copy(position)
+        boxMesh.castShadow = true
+        this.scene.add(boxMesh)
+
+        const boxBody = this.world.createRigidBody(
+            RAPIER.RigidBodyDesc[bodyType]().setTranslation(position.x, position.y, position.z)
+        )
+        const boxShape = RAPIER.ColliderDesc.cuboid(size.x / 2, size.y / 2, size.z / 2)
+                                .setMass(1)
+                                .setRestitution(0)
+        this.world.createCollider(boxShape, boxBody)
+
+        if (bodyType === 'dynamic')
+            this.physics.register(boxMesh, boxBody)
+
+        return { mesh: boxMesh, body: boxBody }
     }
 
     destroy() {
