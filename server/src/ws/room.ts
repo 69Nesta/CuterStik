@@ -1,17 +1,47 @@
-import { World } from '@game/world.js'
-import { PhysicsWorld } from '@game/physics_world.js'
-import type { PlayerId } from '@types/player_id.js'
-import type { PlayerEntity } from '@entities/player_entity.js'
+import { World } from '@game/world.ts'
+import { type PlayerId } from '@/types/player_id.ts'
+import { PlayerEntity } from '@game/player_entity.ts'
+import { PhysicsWorld } from '@physics/physics_world'
+import type { Client } from '@ws/client'
 
 class Room {
 	private id: string
 	private world: World
-	// private physics: PhysicsWorld
-	private players: Map<PlayerId, PlayerEntity>
+	private physics: PhysicsWorld
+	private players: Map<PlayerId, [Client, PlayerEntity]>
 
-	tick(dt: number) {
+	constructor(id: string) {
+		this.id = id
+		this.physics = new PhysicsWorld()
+		this.world = new World(this.physics.world)
+		this.players = new Map()
+	}
+
+	addPlayer(playerId: PlayerId, client: Client) {
+		const playerEntity = new PlayerEntity(playerId)
+
+		this.players.set(playerId, [client, playerEntity])
+
+		this.world.addEntity(playerEntity)
+	}
+
+	removePlayer(playerId: PlayerId) {
+		const entry = this.players.get(playerId)
+		if (!entry) return
+
+		const [, playerEntity] = entry
+
+		this.world.removeEntity(playerEntity)
+
+		this.players.delete(playerId)
+	}
+
+	update(dt: number) {
 		this.world.update(dt)
-		this.physics.step(dt)
+
+		for (const player of this.players.values()) {
+			// player.update(dt)
+		}
 	}
 }
 

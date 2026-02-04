@@ -29,6 +29,8 @@
     // Custom Imports
     "paths": {
       "@packets/*": ["./src/packets/*"],
+      "@physics/*": ["./src/physics/*"],
+      "@types/*": ["./src/types/*"],
       "@game/*": ["./src/game/*"],
       "@ws/*": ["./src/ws/*"],
       "@/*": ["./src/*"]

@@ -1,16 +1,26 @@
 import Bun from 'bun';
 import { Client } from '@ws/client';
 import type { WebSocketData } from '@ws/types';
+import { set } from 'zod';
 
-Bun.serve({
+
+const server = Bun.serve({
 	port: 8080,
-	fetch(req, server) {
+	fetch(req, srv) {
+		if (srv.upgrade(req, {
+			headers: {'Sec-WebSocket-Protocol': 'fps-protocol'},
+			data: {} as WebSocketData
+		})) {
+			return; // do not return a Response
+		}
 		return new Response("FPS Server");
 	},
 	websocket: {
 		data: {} as WebSocketData,
 		open(ws) {
-			ws.data.client = new Client(ws, Date.now());
+			const client = new Client(ws, Bun.randomUUIDv7());
+			ws.data.client = client
+			ws.send(client.id)
 		},
 		message(ws, data) {
 			if (!(data instanceof ArrayBuffer))
@@ -24,3 +34,5 @@ Bun.serve({
 		}
 	}
 });
+
+export { server };

@@ -9,6 +9,7 @@ import { World } from '@engine/world.ts'
 import { Physics } from '@engine/physics.ts';
 import { Input } from '@engine/input.ts';
 import { Player } from './entities/player';
+import { Client } from '@engine/network/client';
 
 
 export class Engine {
@@ -24,6 +25,7 @@ export class Engine {
     public camera!: Camera;
     public renderer!: Renderer;
     public player!: Player;
+    public client!: Client;
 
     public debugObject!: { printCameraCoords?: () => void };
 
@@ -45,6 +47,7 @@ export class Engine {
         this.physics = new Physics();
         this.world = new World();
         this.camera = new Camera();
+        this.client = new Client();
         this.player = new Player('Bot', 100);
 
         // this.raycaster = new Raycaster();

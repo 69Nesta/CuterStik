@@ -4,11 +4,13 @@ import Bun from 'bun';
 import { decodeInput } from '@packets/codec';
 import { InputSchema, type InputPacket } from '@packets/input';
 import { PacketType } from '@packets/enums';
-
+import { RoomManagerInstance } from '@ws/room_manager';
+import type { PlayerId } from '@/types/player_id';
+import { PlayerEntity } from '@game/player_entity';
 
 
 export class Client {
-	readonly id: number;
+	readonly id: PlayerId;
 	private ws: Bun.ServerWebSocket<WebSocketData>;
 
 	// Input buffering
@@ -18,8 +20,9 @@ export class Client {
 	// Net stats
 	ping = 0;
 	lastHeard = Date.now();
+	private roomId: string | null = null;
 
-	constructor(ws: Bun.ServerWebSocket<WebSocketData>, id: number) {
+	constructor(ws: Bun.ServerWebSocket<WebSocketData>, id: PlayerId) {
 		this.ws = ws;
 		this.id = id;
 	}
@@ -35,10 +38,36 @@ export class Client {
 			case PacketType.INPUT:
 				this.handleInput(data);
 				break;
+			case PacketType.PONG:
+				const sentTime = view.getFloat64(1);
+				this.ping = Date.now() - sentTime;
+				break;
+			case PacketType.LOGIN:
+				this.login();
+				break;
+			default:
+				// Unknown packet type
+				console.warn(`Unknown packet type: ${type}`);
+				break;
 		}
 	}
 
-	// input handling
+	login() {
+		if (this.roomId) return;
+		RoomManagerInstance
+			.getRoom("default")
+			?.addPlayer(this.id, this);
+		this.roomId = "default";
+	}
+
+	logout() {
+		if (!this.roomId) return;
+		RoomManagerInstance
+			.getRoom(this.roomId)
+			?.removePlayer(this.id);
+		this.roomId = null;
+	}
+
 	private handleInput(buffer: ArrayBuffer) {
 		const raw = decodeInput(buffer);
 
