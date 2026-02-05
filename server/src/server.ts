@@ -20,7 +20,6 @@ const server = Bun.serve({
 		open(ws) {
 			const client = new Client(ws, Bun.randomUUIDv7());
 			ws.data.client = client
-			ws.send(client.id)
 		},
 		message(ws, data) {
 			if (!(data instanceof ArrayBuffer))

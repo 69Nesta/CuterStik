@@ -1,11 +1,12 @@
 class Client {
-	readonly id: string;
+	public id: string | null;
 	private ws: WebSocket;
 
 	constructor()
 	{
 		console.log("WebSocket URL:", `ws://${window.location.hostname}:${import.meta.env.VITE_WS_PORT}`);
 		this.ws = new WebSocket(`ws://${window.location.hostname}:${import.meta.env.VITE_WS_PORT}`);
+		this.id = null;
 		// this.id = crypto.randomUUID();
 	}
 

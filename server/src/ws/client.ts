@@ -25,6 +25,15 @@ export class Client {
 	constructor(ws: Bun.ServerWebSocket<WebSocketData>, id: PlayerId) {
 		this.ws = ws;
 		this.id = id;
+
+		console.log(`Client connected: ${this.id}`);
+	}
+
+	resonse_login() {
+		this.ws.send(JSON.stringify({
+			type: 'welcome',
+			id: this.id
+		}));
 	}
 
 	// called by Bun on message
@@ -99,6 +108,9 @@ export class Client {
 	}
 
 	onClose() {
+		console.log(`Client disconnected: ${this.id}`);
 		// cleanup handled by Room
+
+		this.logout();
 	}
 }
