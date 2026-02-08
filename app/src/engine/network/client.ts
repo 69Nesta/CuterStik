@@ -1,37 +1,57 @@
 class Client {
-	public id: string | null;
-	private ws: WebSocket;
+	public id: string | null = null ;
+	private ws!: WebSocket;
+
+	URL = `ws://${window.location.hostname}:${import.meta.env.VITE_WS_PORT}`;
 
 	constructor()
 	{
-		console.log("WebSocket URL:", `ws://${window.location.hostname}:${import.meta.env.VITE_WS_PORT}`);
-		this.ws = new WebSocket(`ws://${window.location.hostname}:${import.meta.env.VITE_WS_PORT}`);
-		this.id = null;
-		// this.id = crypto.randomUUID();
-
-		setTimeout(() => {
-			this.login();
-		}, 1000);
+		console.log("WebSocket URL:", this.URL);
+		this.initializate()
 	}
 
 	send(data: string) {
 		this.ws.send(data);
 	}
 
-	onMessage(callback: (data: MessageEvent) => void) {
-		this.ws.addEventListener('message', callback);
+	onMessage(data: ArrayBuffer) {
+		console.log("Received message:", new Uint8Array(data));
 	}
 
-	login() {
-		this.ws.send(JSON.stringify({
-			type: 'login',
-		}));
+	onClose() {
+		this.id = null;
+		// this.ws.close();
+		// setTimeout(() => {
+		// this.ws
+		// 	// this.tryReconnect()
+		// 	// this.login();
+		// }, 1000);
 	}
 
-	logout() {
-		this.ws.send(JSON.stringify({
-			type: 'logout',
-		}));
+	tryReconnect() {
+		if (this.ws.readyState === WebSocket.CLOSED) {
+			console.log("Attempting to reconnect...");
+			this.initializate();
+		}
+	}
+
+	initializate()
+	{
+		this.ws = new WebSocket(this.URL);
+		this.ws.onopen = () => {
+			console.log("WebSocket connection established");
+		};
+		this.ws.onmessage = (event) => {
+			if (event.data instanceof ArrayBuffer) {
+				this.onMessage(event.data);
+			} else {
+				console.warn("Received non-ArrayBuffer message:", event.data);
+			}
+		};
+		this.ws.onclose = () => {
+			console.log("WebSocket connection closed");
+			this.onClose();
+		};
 	}
 
 	ping() {
