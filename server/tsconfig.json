@@ -30,6 +30,7 @@
     "paths": {
       "@packets/*": ["./src/packets/*"],
       "@physics/*": ["./src/physics/*"],
+      "@server/*": ["./src/server/*"],
       "@types/*": ["./src/types/*"],
       "@game/*": ["./src/game/*"],
       "@ws/*": ["./src/ws/*"],

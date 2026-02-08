@@ -1,15 +1,26 @@
+import RAPIER from '@dimforge/rapier3d-compat'
 import { Entity } from '@game/entity'
 
 
 class PlayerEntity extends Entity {
-	id: string;
-	constructor(id: string) {
-		super();
-		this.id = id;
-	}
+	constructor(world: RAPIER.World, spawn_point: RAPIER.Vector3) {
+		const body = world.createRigidBody(
+			RAPIER.RigidBodyDesc
+				.dynamic()
+				.setTranslation(spawn_point.x, spawn_point.y, spawn_point.z)
+		)
+		body.lockRotations(true, false)
 
-	update(deltaTime: number) {
-		// Update player entity logic here
+		const collider = RAPIER.ColliderDesc
+			.cuboid(0.5, 1, 0.5)
+			.setFriction(0.5)
+			.setRestitution(0.1)
+
+		super(
+			world,
+			body,
+			collider
+		)
 	}
 }
 

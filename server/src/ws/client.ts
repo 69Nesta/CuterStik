@@ -6,12 +6,11 @@ import { InputSchema, type InputPacket } from '@packets/input';
 import { PacketType } from '@packets/enums';
 import { RoomManagerInstance } from '@ws/room_manager';
 import type { PlayerId } from '@/types/player_id';
-import { PlayerEntity } from '@game/player_entity';
 
 
 export class Client {
 	readonly id: PlayerId;
-	private ws: Bun.ServerWebSocket<WebSocketData>;
+	public ws: Bun.ServerWebSocket<WebSocketData>;
 
 	// Input buffering
 	private inputQueue: InputPacket[] = [];

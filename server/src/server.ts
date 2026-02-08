@@ -1,7 +1,6 @@
 import Bun from 'bun';
 import { Client } from '@ws/client';
 import type { WebSocketData } from '@ws/types';
-import { set } from 'zod';
 
 
 const server = Bun.serve({
@@ -33,5 +32,7 @@ const server = Bun.serve({
 		}
 	}
 });
+
+
 
 export { server };

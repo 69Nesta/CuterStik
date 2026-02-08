@@ -1,21 +1,22 @@
 import * as RAPIER from '@dimforge/rapier3d-compat';
 import type { Entity } from './entity';
 
+
 export class World {
 	world: RAPIER.World;
 
-	constructor(world: RAPIER.World) {
-		this.world = world;
+	constructor() {
+		this.world = new RAPIER.World(new RAPIER.Vector3(0, -9.81, 0));
 
 		this.setup_map()
 	}
 
-	addEntity(entity: Entity) {
-		// Add player entity to the world
+	add_entity(entity: Entity) {
+		// skip for now 
 	}
 
-	removeEntity(entity: Entity) {
-		// Remove player entity from the world
+	remove_entity(entity: Entity) {
+		entity.destroy()
 	}
 
 	setup_map() {
