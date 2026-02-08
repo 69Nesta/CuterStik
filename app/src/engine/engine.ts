@@ -93,6 +93,7 @@ export class Engine {
         this.scene.clear()
         this.physics.destroy()
         this.input.stop();
+        this.client.destory();
 
         
         if (this.debug.active) {

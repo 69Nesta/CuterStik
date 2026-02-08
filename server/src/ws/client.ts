@@ -29,7 +29,7 @@ export class Client {
 		console.log(`Client connected: ${this.id}`);
 	}
 
-	resonse_login() {
+	response_login() {
 		this.ws.send(JSON.stringify({
 			type: 'welcome',
 			id: this.id
