@@ -1,1 +1,0 @@
-export const test = 'This is a shared package for types and utilities that can be used across both server and client. It is not meant to contain any code that is specific to either environment, but rather to provide a common ground for shared logic and types.';
