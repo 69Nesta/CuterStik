@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { C } from '../wasm'
 import { useHud } from '../game/store'
+import { CrosshairShape } from './Crosshair'
+import { Minimap } from './Minimap'
+import { PerfOverlay } from './PerfOverlay'
+import { SettingsPanel } from './SettingsPanel'
 import { world } from '../game/world'
 import { stopSession } from '../net/session'
 import { hasTeams, modeName, teamName, type GameMode, type Team } from '../net/protocol'
@@ -71,15 +75,7 @@ function Crosshair() {
     const t = setTimeout(() => setHit(false), 150)
     return () => clearTimeout(t)
   }, [hitAt])
-  return (
-    <div className="crosshair">
-      <i className="h l" />
-      <i className="h r" />
-      <i className="v t" />
-      <i className="v b" />
-      {hit && <div className="hitmarker" />}
-    </div>
-  )
+  return <CrosshairShape hit={hit} />
 }
 
 function Vitals() {
@@ -175,12 +171,25 @@ function Scoreboard() {
   )
 }
 
+/**
+ * Grabs the mouse to resume play. Browsers refuse a new lock for about a
+ * second after Esc released it, so a quick Play click retries once; the
+ * click's user activation is still valid by then.
+ */
 function requestLock() {
-  document.querySelector<HTMLCanvasElement>('.game canvas')?.requestPointerLock()
+  const canvas = document.querySelector<HTMLCanvasElement>('.game canvas')
+  if (!canvas) return
+  const retry = () => setTimeout(() => !document.pointerLockElement && canvas.requestPointerLock(), 1100)
+  try {
+    const p = canvas.requestPointerLock() as unknown as Promise<void> | undefined
+    p?.catch?.(retry)
+  } catch {
+    retry()
+  }
 }
 
 function StatusOverlay() {
-  const { alive, spawned, phase, locked, banner, room } = useHud()
+  const { alive, spawned, phase, locked, banner, room, settingsOpen } = useHud()
   const mode = useMode()
   let msg: string | null = null
   if (!alive && phase !== 'MatchEnd') {
@@ -195,15 +204,18 @@ function StatusOverlay() {
     <>
       {banner && <div className="banner">{banner}</div>}
       {msg && <div className="status">{msg}</div>}
-      {!locked && (
-        <div className="paused" onClick={requestLock}>
+      {!locked && settingsOpen && (
+        <SettingsPanel onClose={() => useHud.setState({ settingsOpen: false })} />
+      )}
+      {!locked && !settingsOpen && (
+        <div className="paused">
           <div className="card">
             {room && (
               <p className="room-label">
                 {room.name}: {modeName(room.mode)}
               </p>
             )}
-            <h2>Click to play</h2>
+            <h2>Paused</h2>
             <p>
               <kbd>W A S D</kbd> move · <kbd>Space</kbd> jump · <kbd>Shift</kbd> sprint
               <br />
@@ -211,7 +223,10 @@ function StatusOverlay() {
               <br />
               <kbd>Mouse</kbd> aim & shoot · <kbd>R</kbd> reload · <kbd>Tab</kbd> scores
             </p>
-            <Settings />
+            <button className="play" autoFocus onClick={requestLock}>
+              Play
+            </button>
+            <button onClick={() => useHud.setState({ settingsOpen: true })}>Settings</button>
             <button
               className="secondary"
               onClick={(e) => {
@@ -226,28 +241,6 @@ function StatusOverlay() {
         </div>
       )}
     </>
-  )
-}
-
-function Settings() {
-  const sensitivity = useHud((s) => s.sensitivity)
-  return (
-    <label className="setting" onClick={(e) => e.stopPropagation()}>
-      Sensitivity
-      <input
-        type="range"
-        min={0.5}
-        max={6}
-        step={0.1}
-        value={sensitivity}
-        onChange={(e) => {
-          const v = Number(e.target.value)
-          localStorage.setItem('sensitivity', String(v))
-          useHud.setState({ sensitivity: v })
-        }}
-      />
-      <span>{sensitivity.toFixed(1)}</span>
-    </label>
   )
 }
 
@@ -282,32 +275,18 @@ function SlideMeter() {
   )
 }
 
-function NetGraph() {
-  const [text, setText] = useState('')
-  useEffect(() => {
-    const id = setInterval(() => {
-      const sim = world.sim
-      if (!sim) return
-      setText(
-        `speed ${sim.horizontal_speed().toFixed(2)} m/s · unacked ${sim.pending_count()} · tick ${world.latest?.tick ?? 0}`,
-      )
-    }, 250)
-    return () => clearInterval(id)
-  }, [])
-  return <div className="netgraph">{text}</div>
-}
-
 export function GameHud() {
   return (
     <div className="hud">
       <TopBar />
+      <Minimap />
       <Crosshair />
       <Vitals />
       <SlideMeter />
       <Killfeed />
       <Scoreboard />
       <StatusOverlay />
-      <NetGraph />
+      <PerfOverlay />
     </div>
   )
 }

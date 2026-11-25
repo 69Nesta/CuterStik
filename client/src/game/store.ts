@@ -60,7 +60,7 @@ export type HudState = {
 
   locked: boolean
   showScores: boolean
-  sensitivity: number
+  settingsOpen: boolean
 }
 
 export const useHud = create<HudState>(() => ({
@@ -96,7 +96,7 @@ export const useHud = create<HudState>(() => ({
 
   locked: false,
   showScores: false,
-  sensitivity: Number(localStorage.getItem('sensitivity') ?? 2.2),
+  settingsOpen: false,
 }))
 
 /** setState that skips the update when nothing actually changed. */

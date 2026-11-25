@@ -1,49 +1,51 @@
-// Lobby backdrop: your mannequin on a prototype-grid stage, wearing the
-// colors of the side you picked.
-import { ContactShadows, Outlines } from '@react-three/drei'
+// Lobby backdrop: your agent on a small courtyard set built from the same
+// painted surfaces as the map, wearing the colors of the side you picked.
+import { ContactShadows } from '@react-three/drei'
 import { Canvas, useFrame } from '@react-three/fiber'
 import { useMemo, useRef } from 'react'
 import * as THREE from 'three'
-import type { Team } from '../net/protocol'
+import type { Surface, Team } from '../net/protocol'
 import { Mannequin, type Pose } from '../scene/Mannequin'
-import { INK, SURFACE_STYLE, getSurfaceMaterials, gridTexture } from '../scene/materials'
+import { LIGHTING, getSurfaceMaterials, surfaceGeometry } from '../scene/materials'
+import { Sky } from '../scene/Sky'
 
-function Floor() {
-  const material = useMemo(() => {
-    const map = gridTexture({ ...SURFACE_STYLE.Floor, label: '4m' })
-    map.repeat.set(10, 10)
-    const mat = getSurfaceMaterials().Floor.clone()
-    mat.map = map
-    return mat
-  }, [])
+const SUN: [number, number, number] = [-6, 8, 6]
+
+/** A box from its world-space center and size, so world UVs line up. */
+function Block({ surface, at, size, rot = 0 }: {
+  surface: Surface
+  at: [number, number, number]
+  size: [number, number, number]
+  rot?: number
+}) {
+  const geometry = useMemo(() => {
+    const half = new THREE.Vector3(...size).multiplyScalar(0.5)
+    const c = new THREE.Vector3(...at)
+    return surfaceGeometry(c.clone().sub(half), c.clone().add(half), surface)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [surface, at.join(), size.join()])
   return (
-    <mesh rotation-x={-Math.PI / 2} material={material} receiveShadow>
-      <planeGeometry args={[40, 40]} />
-    </mesh>
+    <mesh
+      geometry={geometry}
+      material={getSurfaceMaterials()[surface]}
+      position={at}
+      rotation-y={rot}
+      castShadow={surface !== 'Floor'}
+      receiveShadow
+    />
   )
 }
 
-function Props() {
-  const m = getSurfaceMaterials()
-  const crate = (pos: [number, number, number], size: number, rot = 0) => (
-    <mesh position={pos} rotation-y={rot} material={m.Crate} castShadow receiveShadow>
-      <boxGeometry args={[size, size, size]} />
-      <Outlines thickness={0.03} color={INK} />
-    </mesh>
-  )
+function Courtyard() {
   return (
     <group>
-      {crate([-1.7, 0.5, -1.2], 1, 0.3)}
-      {crate([-1.55, 1.35, -1.25], 0.7, 0.7)}
-      {crate([1.9, 0.4, -2.2], 0.8, -0.4)}
-      <mesh position={[0.3, 1.5, -4]} material={m.Wall} castShadow receiveShadow>
-        <boxGeometry args={[9, 3, 0.6]} />
-        <Outlines thickness={0.04} color={INK} />
-      </mesh>
-      <mesh position={[2.6, 0.25, -0.2]} material={m.Platform} castShadow receiveShadow>
-        <boxGeometry args={[1.6, 0.5, 1.6]} />
-        <Outlines thickness={0.03} color={INK} />
-      </mesh>
+      <Block surface="Floor" at={[0, -0.5, 0]} size={[40, 1, 40]} />
+      <Block surface="Wall" at={[0.3, 2, -4]} size={[10, 4, 0.6]} />
+      <Block surface="Wall" at={[-4.4, 2, -1.5]} size={[0.6, 4, 4.4]} />
+      <Block surface="Crate" at={[-1.7, 0.5, -1.2]} size={[1, 1, 1]} rot={0.3} />
+      <Block surface="Crate" at={[-1.55, 1.35, -1.25]} size={[0.7, 0.7, 0.7]} rot={0.7} />
+      <Block surface="Crate" at={[1.9, 0.5, -2.4]} size={[1, 1, 1]} rot={-0.4} />
+      <Block surface="Platform" at={[2.8, 0.25, -0.2]} size={[1.6, 0.5, 1.6]} />
     </group>
   )
 }
@@ -84,14 +86,16 @@ export function LobbyStage({ team }: { team: Team | null }) {
       shadows="percentage"
       dpr={[1, 2]}
       camera={{ fov: 32, position: [-1.4, 1.7, 6.2] }}
+      gl={{ toneMapping: THREE.ACESFilmicToneMapping, toneMappingExposure: 1.05 }}
       onCreated={({ camera }) => camera.lookAt(1.6, 1, 0)}
     >
-      <color attach="background" args={['#8fd3ff']} />
-      <fog attach="fog" args={['#bfe6ff', 10, 26]} />
-      <hemisphereLight args={['#eaf6ff', '#8a93a6', 1.5]} />
+      <Sky sunDirection={SUN} />
+      <fog attach="fog" args={[LIGHTING.horizon, 12, 30]} />
+      <hemisphereLight args={[LIGHTING.sky, LIGHTING.ground, 1.15]} />
       <directionalLight
-        position={[4, 7, 5]}
-        intensity={2.2}
+        position={SUN}
+        color={LIGHTING.sun}
+        intensity={3.4}
         castShadow
         shadow-mapSize={[1024, 1024]}
         shadow-normalBias={0.02}
@@ -99,8 +103,7 @@ export function LobbyStage({ team }: { team: Team | null }) {
       <group position={[0, 0, 0]}>
         <Hero team={team} />
       </group>
-      <Props />
-      <Floor />
+      <Courtyard />
       <ContactShadows position={[0, 0.01, 0]} scale={6} blur={2.4} opacity={0.35} far={2} />
     </Canvas>
   )

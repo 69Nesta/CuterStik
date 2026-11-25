@@ -2,6 +2,12 @@
 
 Multiplayer cartoon FPS with three modes: Elimination (attackers vs defenders, rounds), Team Deathmatch and free-for-all Deathmatch. Hitscan, sprint and slide.
 
+![In game](docs/screenshots/ingame.png)
+
+| Lobby | Settings |
+| --- | --- |
+| ![Lobby](docs/screenshots/lobby.png) | ![Settings](docs/screenshots/settings.png) |
+
 ```
 ├── shared/   Rust: constants, map, movement, hitscan, protocol (native + wasm)
 ├── server/   Rust: axum WebSocket server, 64-tick rooms, round rules
@@ -29,6 +35,10 @@ Open two browser tabs to get one player per team: the first round starts once bo
 The lobby lists open rooms (`GET /api/rooms`, polled every 2 s). From it you can quick play (joins the busiest room with space), join a listed room, or create a named one, and pick a side: Attackers, Defenders or Auto. A side preference is honored unless that team already has more players.
 
 Controls: `WASD` move, `Space` jump (hold to bunny-hop), `Shift` sprint (forward only, firing drops you to a run), `C` slide (press while sprinting for a speed boost; hold to keep sliding, jump out to keep the momentum), `Alt` walk, mouse to aim and shoot, `R` reload, `Tab` scoreboard, `Esc` pause.
+
+Settings (lobby ⚙ button, or `Esc` → Settings in game) cover sensitivity, invert Y, FOV, render quality, shadows, a fully custom crosshair and the minimap. They're saved in `localStorage`.
+
+The minimap (top left) always shows teammates. Enemies appear only while someone on your team can actually see them (inside their view cone, clear line of sight, within 60 m), then leave a fading last-seen mark. It can rotate with your view or stay north-up, and follow you or show the whole map.
 
 ## Checks
 

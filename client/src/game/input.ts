@@ -1,6 +1,7 @@
 // Keyboard + mouse state. Keys use `KeyboardEvent.code` (physical position),
 // so WASD works on AZERTY/QWERTZ without a separate mapping.
 import { Buttons } from '../net/protocol'
+import { useSettings } from './settings'
 import { useHud } from './store'
 import { world } from './world'
 
@@ -28,9 +29,10 @@ function onKeyUp(e: KeyboardEvent) {
 function onMouseMove(e: MouseEvent) {
   if (!document.pointerLockElement) return
   // Sensitivity is in the familiar "cs-like" scale: 0.022 deg per count.
-  const radPerPx = (useHud.getState().sensitivity * 0.022 * Math.PI) / 180
+  const { sensitivity, invertY } = useSettings.getState()
+  const radPerPx = (sensitivity * 0.022 * Math.PI) / 180
   world.yaw -= e.movementX * radPerPx
-  world.pitch -= e.movementY * radPerPx
+  world.pitch -= e.movementY * radPerPx * (invertY ? -1 : 1)
   world.pitch = Math.max(-PITCH_LIMIT, Math.min(PITCH_LIMIT, world.pitch))
   world.yaw = ((world.yaw % (Math.PI * 2)) + Math.PI * 2) % (Math.PI * 2)
 }
@@ -49,7 +51,7 @@ function onLockChange() {
     keys.clear()
     mouseDown = false
   }
-  useHud.setState({ locked })
+  useHud.setState(locked ? { locked, settingsOpen: false } : { locked })
 }
 
 function onBlur() {

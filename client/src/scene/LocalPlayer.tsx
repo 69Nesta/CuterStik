@@ -5,8 +5,9 @@ import { useEffect, useRef } from 'react'
 import * as THREE from 'three'
 import { C, raycastMap } from '../wasm'
 import { attachInput, sampleInput } from '../game/input'
-import { addTracer, world } from '../game/world'
+import { addTracer, noteInputSent, world } from '../game/world'
 import { Buttons } from '../net/protocol'
+import { useSettings } from '../game/settings'
 
 const BASE_FOV = 80
 /** Extra FOV at full sprint / slide speed: sells the speed boost. */
@@ -55,6 +56,7 @@ export function LocalPlayer() {
 
       const bytes = sim.tick(forward, right, buttons, world.yaw, world.pitch, canAct)
       world.send?.(bytes)
+      noteInputSent()
     }
 
     if (me && me.spawn_id > 0) {
@@ -68,7 +70,8 @@ export function LocalPlayer() {
       camera.rotation.set(world.pitch, world.yaw, roll.current, 'YXZ')
       const over = Math.max(0, sim.horizontal_speed() - C.max_speed) / (C.sprint_speed - C.max_speed)
       const cam = camera as THREE.PerspectiveCamera
-      const fov = BASE_FOV + SPEED_FOV * Math.min(over, 1.4)
+      const { speedFov } = useSettings.getState()
+      const fov = BASE_FOV + (speedFov ? SPEED_FOV * Math.min(over, 1.4) : 0)
       if (Math.abs(cam.fov - fov) > 0.01) {
         cam.fov = THREE.MathUtils.damp(cam.fov, fov, 6, delta)
         cam.updateProjectionMatrix()

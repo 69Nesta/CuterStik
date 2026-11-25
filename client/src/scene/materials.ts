@@ -1,153 +1,178 @@
-// Prototype "dev" materials, in the spirit of Unreal's WorldGridMaterial and
-// Unity prototype textures: flat colors with a metric grid, toon-shaded so
-// the whole game reads as a cartoon blockout. All textures are generated on
-// a canvas at startup; nothing is downloaded.
+// Materials and box geometry for the stylized-tactical look: hand-painted
+// textures (see textures.ts) on soft PBR materials, lit by a warm sun with
+// cool sky fill. No ink outlines; shapes read through value and color.
 import * as THREE from 'three'
 import type { Surface, Team } from '../net/protocol'
+import {
+  capTexture,
+  crateTexture,
+  floorTexture,
+  panelTexture,
+  treadTexture,
+  wallTexture,
+  type PaintedTexture,
+} from './textures'
 
-export const TEAM_COLOR: Record<Team, string> = { T: '#ff4f6d', Ct: '#2fa4ff' }
-export const NEUTRAL_COLOR = '#b8bec8'
+export const TEAM_COLOR: Record<Team, string> = { T: '#ff5a64', Ct: '#38b8ff' }
+export const NEUTRAL_COLOR = '#c9c2b6'
 /** Free-for-all: every opponent wears this. */
-export const FFA_COLOR = '#ffd23f'
-export const INK = '#1d2130'
+export const FFA_COLOR = '#ffc93c'
 
-type GridStyle = {
-  base: string
-  line: string
-  /** Meters covered by one texture repeat. */
-  tile: number
-  /** Grid cells per tile; every cell gets a line, the tile edge a thick one. */
-  cells: number
-  /** Size stamp in the tile corner. Only for flat planes: box UVs mirror it. */
-  label?: string
+/** Sun and sky, shared by every scene so the look stays consistent. */
+export const LIGHTING = {
+  sun: '#ffeed6',
+  sky: '#cfe2ff',
+  ground: '#a8916f',
+  horizon: '#efdcc2',
+  zenith: '#4f9be0',
 }
 
-export const SURFACE_STYLE: Record<Surface, GridStyle> = {
-  Floor: { base: '#9ba2ac', line: '#6b727d', tile: 4, cells: 4 },
-  Wall: { base: '#e4e7eb', line: '#a5abb5', tile: 4, cells: 4 },
-  Crate: { base: '#ff9b2f', line: '#c2620c', tile: 1, cells: 2 },
-  Platform: { base: '#8f7cff', line: '#5a47cf', tile: 2, cells: 4 },
+/**
+ * How a surface's texture lands on a box face.
+ * - `world`: UVs are world coordinates / tile, so neighbouring boxes line up
+ *   and side faces start at ground level (v = y / tileV).
+ * - `fit`: each face shows a whole number of repeats, so framed modules
+ *   (crate panels) never get cut in half.
+ */
+type Mapping = { mode: 'world' | 'fit'; tileU: number; tileV: number }
+
+type SurfaceSpec = { side: Mapping; top: Mapping }
+
+const SPEC: Record<Surface, SurfaceSpec> = {
+  Floor: { side: { mode: 'world', tileU: 8, tileV: 8 }, top: { mode: 'world', tileU: 8, tileV: 8 } },
+  Wall: { side: { mode: 'world', tileU: 8, tileV: 8 }, top: { mode: 'world', tileU: 2, tileV: 2 } },
+  Crate: { side: { mode: 'fit', tileU: 1, tileV: 1 }, top: { mode: 'fit', tileU: 1, tileV: 1 } },
+  Platform: { side: { mode: 'fit', tileU: 1, tileV: 1 }, top: { mode: 'fit', tileU: 1, tileV: 1 } },
 }
 
-function finish(canvas: HTMLCanvasElement) {
-  const tex = new THREE.CanvasTexture(canvas)
-  tex.wrapS = tex.wrapT = THREE.RepeatWrapping
-  tex.colorSpace = THREE.SRGBColorSpace
-  tex.anisotropy = 8
-  return tex
-}
+/** BoxGeometry face order: +x, -x, +y, -y, +z, -z. */
+const TOP_FACES = new Set([2, 3])
 
-export function gridTexture({ base, line, cells, label }: GridStyle) {
-  const size = 512
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = size
-  const ctx = canvas.getContext('2d')!
-  ctx.fillStyle = base
-  ctx.fillRect(0, 0, size, size)
+/** Box geometry for a world-space AABB, with UVs set up for its surface. */
+export function surfaceGeometry(min: THREE.Vector3Like, max: THREE.Vector3Like, surface: Surface) {
+  const sx = max.x - min.x
+  const sy = max.y - min.y
+  const sz = max.z - min.z
+  const cx = (min.x + max.x) / 2
+  const cy = (min.y + max.y) / 2
+  const cz = (min.z + max.z) / 2
+  const geo = new THREE.BoxGeometry(sx, sy, sz)
+  const pos = geo.attributes.position as THREE.BufferAttribute
+  const uv = geo.attributes.uv as THREE.BufferAttribute
+  const spec = SPEC[surface]
+  const faceSize: [number, number][] = [
+    [sz, sy], [sz, sy],
+    [sx, sz], [sx, sz],
+    [sx, sy], [sx, sy],
+  ]
 
-  const cell = size / cells
-  ctx.strokeStyle = line
-  // Half-cell lines: faint.
-  ctx.globalAlpha = 0.35
-  ctx.lineWidth = 2
-  ctx.beginPath()
-  for (let i = 0; i < cells; i++) {
-    const p = i * cell + cell / 2
-    ctx.moveTo(p, 0); ctx.lineTo(p, size)
-    ctx.moveTo(0, p); ctx.lineTo(size, p)
-  }
-  ctx.stroke()
-  // Cell lines.
-  ctx.globalAlpha = 0.8
-  ctx.lineWidth = 3
-  ctx.beginPath()
-  for (let i = 1; i < cells; i++) {
-    const p = i * cell
-    ctx.moveTo(p, 0); ctx.lineTo(p, size)
-    ctx.moveTo(0, p); ctx.lineTo(size, p)
-  }
-  ctx.stroke()
-  // Tile edge: thick, drawn half on each side so repeats line up.
-  ctx.globalAlpha = 1
-  ctx.lineWidth = 8
-  ctx.strokeRect(0, 0, size, size)
-
-  if (label) {
-    ctx.fillStyle = line
-    ctx.font = '700 34px Rubik, system-ui, sans-serif'
-    ctx.textBaseline = 'top'
-    ctx.fillText(label, 16, 14)
-  }
-  return finish(canvas)
-}
-
-/** Two-tone checker, like a UV test texture, for characters. */
-export function checkerTexture(color: string, squares = 8) {
-  const size = 256
-  const canvas = document.createElement('canvas')
-  canvas.width = canvas.height = size
-  const ctx = canvas.getContext('2d')!
-  const c = new THREE.Color(color)
-  ctx.fillStyle = `#${c.getHexString()}`
-  ctx.fillRect(0, 0, size, size)
-  ctx.fillStyle = `#${c.clone().multiplyScalar(0.82).getHexString()}`
-  const s = size / squares
-  for (let y = 0; y < squares; y++)
-    for (let x = (y % 2); x < squares; x += 2) ctx.fillRect(x * s, y * s, s, s)
-  return finish(canvas)
-}
-
-let toonRamp: THREE.DataTexture | null = null
-/** Three hard light bands: the cel-shaded look. */
-export function toonGradient() {
-  if (toonRamp) return toonRamp
-  const data = new Uint8Array([110, 110, 110, 255, 190, 190, 190, 255, 255, 255, 255, 255])
-  toonRamp = new THREE.DataTexture(data, 3, 1, THREE.RGBAFormat)
-  toonRamp.minFilter = toonRamp.magFilter = THREE.NearestFilter
-  toonRamp.generateMipmaps = false
-  toonRamp.needsUpdate = true
-  return toonRamp
-}
-
-export function toon(params: THREE.MeshToonMaterialParameters) {
-  return new THREE.MeshToonMaterial({ gradientMap: toonGradient(), ...params })
-}
-
-let surfaceMaterials: Record<Surface, THREE.MeshToonMaterial> | null = null
-export function getSurfaceMaterials() {
-  if (!surfaceMaterials) {
-    const out = {} as Record<Surface, THREE.MeshToonMaterial>
-    for (const s of Object.keys(SURFACE_STYLE) as Surface[]) {
-      out[s] = toon({ map: gridTexture(SURFACE_STYLE[s]) })
+  for (let face = 0; face < 6; face++) {
+    const m = TOP_FACES.has(face) ? spec.top : spec.side
+    for (let i = 0; i < 4; i++) {
+      const idx = face * 4 + i
+      if (m.mode === 'fit') {
+        const [w, h] = faceSize[face]
+        const ru = Math.max(1, Math.round(w / m.tileU))
+        const rv = Math.max(1, Math.round(h / m.tileV))
+        uv.setXY(idx, uv.getX(idx) * ru, uv.getY(idx) * rv)
+        continue
+      }
+      const x = pos.getX(idx) + cx
+      const y = pos.getY(idx) + cy
+      const z = pos.getZ(idx) + cz
+      // Pick the two world axes in the face's plane, oriented so textures
+      // read the right way round from outside the box.
+      let u: number
+      let v: number
+      switch (face) {
+        case 0: u = -z; v = y; break
+        case 1: u = z; v = y; break
+        case 2: u = x; v = -z; break
+        case 3: u = x; v = z; break
+        case 4: u = x; v = y; break
+        default: u = -x; v = y; break
+      }
+      uv.setXY(idx, u / m.tileU, v / m.tileV)
     }
-    surfaceMaterials = out
+  }
+  return geo
+}
+
+function painted(tex: PaintedTexture, params: THREE.MeshStandardMaterialParameters = {}) {
+  return new THREE.MeshStandardMaterial({
+    map: tex.map,
+    normalMap: tex.normalMap,
+    normalScale: new THREE.Vector2(0.8, 0.8),
+    roughness: 0.9,
+    metalness: 0,
+    ...params,
+  })
+}
+
+type FaceMaterials = THREE.MeshStandardMaterial[]
+
+/** Six materials per surface, in BoxGeometry face order. */
+let surfaceMaterials: Record<Surface, FaceMaterials> | null = null
+export function getSurfaceMaterials() {
+  if (surfaceMaterials) return surfaceMaterials
+  const faces = (side: THREE.MeshStandardMaterial, top: THREE.MeshStandardMaterial) => [
+    side, side, top, top, side, side,
+  ]
+  const floor = painted(floorTexture(), { roughness: 0.92 })
+  const wall = painted(wallTexture(), { roughness: 0.95 })
+  const cap = painted(capTexture(), { roughness: 0.9 })
+  const crate = painted(crateTexture(), { roughness: 0.8 })
+  const panel = painted(panelTexture(), { roughness: 0.55 })
+  const tread = painted(treadTexture(), { roughness: 0.5 })
+  surfaceMaterials = {
+    Floor: faces(floor, floor),
+    Wall: faces(wall, cap),
+    Crate: faces(crate, crate),
+    Platform: faces(panel, tread),
   }
   return surfaceMaterials
 }
 
 export type CharacterMaterials = {
-  body: THREE.MeshToonMaterial
-  joint: THREE.MeshToonMaterial
-  visor: THREE.MeshToonMaterial
-  gun: THREE.MeshToonMaterial
-  gunAccent: THREE.MeshToonMaterial
+  /** Team-colored armor panels. */
+  body: THREE.MeshStandardMaterial
+  /** Dark undersuit: legs and joints. */
+  joint: THREE.MeshStandardMaterial
+  /** Glowing visor in the team color. */
+  visor: THREE.MeshStandardMaterial
+  gun: THREE.MeshStandardMaterial
+  gunAccent: THREE.MeshStandardMaterial
 }
 
 const characterCache = new Map<string, CharacterMaterials>()
 export type Look = Team | 'ffa' | null
+
+export function lookColor(look: Look) {
+  return look === 'ffa' ? FFA_COLOR : look ? TEAM_COLOR[look] : NEUTRAL_COLOR
+}
 
 /** Materials for a team, free-for-all opponents, or `null` (neutral). */
 export function getCharacterMaterials(look: Look) {
   const key = look ?? 'none'
   let m = characterCache.get(key)
   if (!m) {
-    const color = look === 'ffa' ? FFA_COLOR : look ? TEAM_COLOR[look] : NEUTRAL_COLOR
+    const color = lookColor(look)
     m = {
-      body: toon({ map: checkerTexture(color) }),
-      joint: toon({ color: '#3a3f4d' }),
-      visor: toon({ color: INK }),
-      gun: toon({ color: '#454b59' }),
-      gunAccent: toon({ color: '#ff9b2f' }),
+      body: new THREE.MeshStandardMaterial({ color, roughness: 0.45 }),
+      joint: new THREE.MeshStandardMaterial({ color: '#2b3039', roughness: 0.7 }),
+      visor: new THREE.MeshStandardMaterial({
+        color: '#10141c',
+        emissive: color,
+        emissiveIntensity: 2.2,
+        roughness: 0.2,
+      }),
+      gun: new THREE.MeshStandardMaterial({ color: '#3a3f48', roughness: 0.35, metalness: 0.1 }),
+      gunAccent: new THREE.MeshStandardMaterial({
+        color,
+        emissive: color,
+        emissiveIntensity: 0.6,
+        roughness: 0.4,
+      }),
     }
     characterCache.set(key, m)
   }

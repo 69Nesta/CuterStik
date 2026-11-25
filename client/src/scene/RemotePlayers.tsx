@@ -23,7 +23,7 @@ const lerpAngle = (a: number, b: number, t: number) => {
 }
 
 /** Interpolated state of a player at the current render time. */
-function sample(id: PlayerId): Sample | null {
+export function sample(id: PlayerId): Sample | null {
   const buf = world.buffer
   if (!buf.length || world.clockOffset === null) return null
   const renderMs = performance.now() - world.clockOffset - INTERP_DELAY_MS

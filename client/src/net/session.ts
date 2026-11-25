@@ -1,6 +1,6 @@
 // WebSocket session: handshake, snapshot handling, prediction reconcile.
 import { C, LocalSim, decodeServer, encodeHello } from '../wasm'
-import { addTracer, resetWorld, world } from '../game/world'
+import { addTracer, noteAck, resetWorld, world } from '../game/world'
 import { patchHud, useHud, type KillfeedEntry, type PhaseLabel } from '../game/store'
 import {
   teamName,
@@ -90,6 +90,7 @@ function onMessage(bytes: Uint8Array) {
 function onSnapshot(snap: Snapshot) {
   const now = performance.now()
   world.latest = snap
+  noteAck(snap.ack_seq)
 
   // Clock sync for interpolation: track the lowest observed offset, slowly
   // relaxing upward so a temporary lag spike doesn't stick forever.

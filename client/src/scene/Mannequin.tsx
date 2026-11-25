@@ -1,11 +1,10 @@
-// The player character: a capsule mannequin (the engine-default dummy look)
-// wearing a team-colored checker test texture. Proportions follow the
-// server hitboxes: body up to C.head_start, head above it.
-import { Outlines } from '@react-three/drei'
+// The player character: a capsule agent in a dark undersuit with
+// team-colored armor and a glowing visor. Proportions follow the server
+// hitboxes: body up to C.head_start, head above it.
 import { useFrame } from '@react-three/fiber'
 import { useRef, type RefObject } from 'react'
 import * as THREE from 'three'
-import { INK, getCharacterMaterials, type Look } from './materials'
+import { getCharacterMaterials, type Look } from './materials'
 
 export type Pose = {
   /** Horizontal speed in m/s, drives the walk cycle. */
@@ -14,9 +13,6 @@ export type Pose = {
   onGround: boolean
   sliding: boolean
 }
-
-const OUTLINE = 0.022
-const ink = <Outlines thickness={OUTLINE} color={INK} />
 
 export function Mannequin({ look, pose }: { look: Look; pose: RefObject<Pose> }) {
   const m = getCharacterMaterials(look)
@@ -58,7 +54,6 @@ export function Mannequin({ look, pose }: { look: Look; pose: RefObject<Pose> })
         <group key={i} ref={ref} position={[i === 0 ? -0.13 : 0.13, 0.82, 0]}>
           <mesh position={[0, -0.37, 0]} material={m.joint} castShadow>
             <capsuleGeometry args={[0.11, 0.5, 4, 12]} />
-            {ink}
           </mesh>
         </group>
       ))}
@@ -66,13 +61,11 @@ export function Mannequin({ look, pose }: { look: Look; pose: RefObject<Pose> })
       <group ref={torso}>
         <mesh position={[0, 1.1, 0]} material={m.body} castShadow>
           <capsuleGeometry args={[0.25, 0.28, 6, 16]} />
-          {ink}
         </mesh>
 
         <group ref={head} position={[0, 1.45, 0]}>
           <mesh position={[0, 0.19, 0]} material={m.body} castShadow>
             <sphereGeometry args={[0.18, 20, 14]} />
-            {ink}
           </mesh>
           {/* Visor shows where the player is facing. */}
           <mesh position={[0, 0.21, -0.15]} rotation-z={Math.PI / 2} material={m.visor}>
@@ -84,7 +77,6 @@ export function Mannequin({ look, pose }: { look: Look; pose: RefObject<Pose> })
           {/* Right arm along the stock, left arm out to the handguard. */}
           <mesh position={[0.24, -0.06, -0.16]} rotation-x={Math.PI / 2.3} material={m.body} castShadow>
             <capsuleGeometry args={[0.075, 0.26, 4, 10]} />
-            {ink}
           </mesh>
           <mesh
             position={[-0.06, -0.1, -0.3]}
@@ -93,19 +85,16 @@ export function Mannequin({ look, pose }: { look: Look; pose: RefObject<Pose> })
             castShadow
           >
             <capsuleGeometry args={[0.07, 0.36, 4, 10]} />
-            {ink}
           </mesh>
           <group position={[0.12, -0.12, -0.42]}>
             <mesh material={m.gun} castShadow>
               <boxGeometry args={[0.08, 0.12, 0.66]} />
-              {ink}
             </mesh>
             <mesh position={[0, -0.1, 0.12]} rotation-x={0.3} material={m.gun}>
               <boxGeometry args={[0.06, 0.14, 0.08]} />
             </mesh>
             <mesh position={[0, 0.01, -0.38]} material={m.gunAccent}>
               <boxGeometry args={[0.06, 0.06, 0.12]} />
-              {ink}
             </mesh>
           </group>
         </group>

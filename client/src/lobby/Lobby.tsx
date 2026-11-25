@@ -13,6 +13,7 @@ import {
   type Team,
 } from '../net/protocol'
 import { LobbyStage } from './LobbyStage'
+import { SettingsPanel } from '../hud/SettingsPanel'
 
 const POLL_MS = 2000
 
@@ -152,6 +153,7 @@ export function Lobby() {
   const { name: savedName, error, status, teamPref, modePref } = useHud()
   const [name, setName] = useState(savedName)
   const [roomName, setRoomName] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const { rooms, error: offline, loaded } = useRooms()
   const busy = status === 'connecting'
 
@@ -199,6 +201,9 @@ export function Lobby() {
             ? `You'll join the ${teamName(teamPref)} if they aren't outnumbered.`
             : 'You go to whichever side needs a player.'}
         </p>
+        <button type="button" className="btn btn-light settings-open" onClick={() => setSettingsOpen(true)}>
+          ⚙ Settings
+        </button>
       </section>
 
       <section className="lobby-rooms panel" aria-label="Rooms">
@@ -247,6 +252,8 @@ export function Lobby() {
           {busy ? 'Connecting…' : `Play ${modeName(modePref)}`}
         </button>
       </section>
+
+      {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
     </div>
   )
 }

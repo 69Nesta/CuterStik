@@ -33,6 +33,13 @@ export const world = {
   muzzleFlashAt: 0,
 
   send: null as ((bytes: Uint8Array) => void) | null,
+
+  /** Input seq numbers, mirrored from LocalSim (it starts at 1). */
+  inputSeq: 0,
+  /** Send time of each unacknowledged input, oldest first. */
+  sentAt: new Map<number, number>(),
+  /** Smoothed input round trip in ms: send to server acknowledgement. */
+  ping: null as number | null,
 }
 
 export function resetWorld() {
@@ -47,6 +54,33 @@ export function resetWorld() {
   world.tracers = []
   world.recoil = 0
   world.send = null
+  world.inputSeq = 0
+  world.sentAt.clear()
+  world.ping = null
+}
+
+/** Call after every `sim.tick` that was sent. */
+export function noteInputSent() {
+  world.inputSeq++
+  world.sentAt.set(world.inputSeq, performance.now())
+  // Never acknowledged (e.g. dropped connection): don't grow forever.
+  if (world.sentAt.size > 512) world.sentAt.delete(world.sentAt.keys().next().value!)
+}
+
+/**
+ * Snapshot acknowledged inputs up to `ack`. The time since we sent that
+ * input is the round trip (plus up to one server tick of queueing).
+ */
+export function noteAck(ack: number) {
+  const sent = world.sentAt.get(ack)
+  if (sent !== undefined) {
+    const rtt = performance.now() - sent
+    world.ping = world.ping === null ? rtt : world.ping + (rtt - world.ping) * 0.1
+  }
+  for (const seq of world.sentAt.keys()) {
+    if (seq > ack) break
+    world.sentAt.delete(seq)
+  }
 }
 
 export function addTracer(from: Vec3, to: Vec3, local: boolean) {
