@@ -5,6 +5,7 @@ export const InputSchema = z.object({
 	tick: z.number(),
 	moveX: z.number().min(-1).max(1),
 	moveY: z.number().min(-1).max(1),
+	moveZ: z.number().min(-1).max(1),
 	jump: z.boolean(),
 	shoot: z.boolean(),
 	yaw: z.number(),

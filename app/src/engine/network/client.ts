@@ -1,3 +1,5 @@
+import { decode_join, encode_leave, decode_snapshot, encode_input } from '@shared/packets/codec';
+
 class Client {
 	public id: string | null = null ;
 	private ws!: WebSocket;
@@ -15,7 +17,10 @@ class Client {
 	}
 
 	onMessage(data: ArrayBuffer) {
-		console.log("Received message:", new Uint8Array(data));
+		const view = new DataView(data);
+		view.setUint8(0, 0); // Packet type: 0 for join
+		
+		// console.log("Received message:", new Uint8Array(data));
 	}
 
 	onClose() {

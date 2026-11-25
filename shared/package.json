@@ -1,0 +1,12 @@
+{
+	"name": "@project/shared",
+	"version": "1.0.0",
+	"type": "module",
+	"src": "src",
+	"scripts": {
+	},
+	"exports": {
+		".": "./src/index.ts",
+		"./*": "./src/*"
+	}
+}

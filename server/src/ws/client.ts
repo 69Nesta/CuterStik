@@ -1,27 +1,27 @@
 import type { WebSocketData } from '@ws/types';
 
 import Bun from 'bun';
-import { decodeInput } from '@packets/codec';
-import { InputSchema, type InputPacket } from '@packets/input';
-import { PacketType } from '@packets/enums';
+import { decode_input } from '../../../shared/src/packets/codec';
+import { InputSchema, type InputPacket } from '@shared/packets/input';
+import { PacketSize, PacketType } from '../../../shared/src/packets/enums';
 import { RoomManagerInstance } from '@ws/room_manager';
-import type { PlayerId } from '@/types/player_id';
+import type { ClientId } from '@/types/ids';
 
 
 export class Client {
-	readonly id: PlayerId;
+	readonly id: ClientId;
 	public ws: Bun.ServerWebSocket<WebSocketData>;
 
 	// Input buffering
-	private inputQueue: InputPacket[] = [];
-	private lastSeq = 0;
+	private input_queue: InputPacket[] = [];
+	private last_seq = 0;
 
 	// Net stats
 	ping = 0;
-	lastHeard = Date.now();
-	private roomId: string | null = null;
+	last_heard = Date.now();
+	private room_id: string | null = null;
 
-	constructor(ws: Bun.ServerWebSocket<WebSocketData>, id: PlayerId) {
+	constructor(ws: Bun.ServerWebSocket<WebSocketData>, id: ClientId) {
 		this.ws = ws;
 		this.id = id;
 
@@ -36,15 +36,15 @@ export class Client {
 	}
 
 	// called by Bun on message
-	onMessage(data: ArrayBuffer) {
-		this.lastHeard = Date.now();
+	on_message(data: ArrayBuffer) {
+		this.last_heard = Date.now();
 
 		const view = new DataView(data);
 		const type = view.getUint8(0);
 
 		switch (type) {
 			case PacketType.INPUT:
-				this.handleInput(data);
+				this.handle_input(data);
 				break;
 			case PacketType.PONG:
 				const sentTime = view.getFloat64(1);
@@ -60,24 +60,31 @@ export class Client {
 		}
 	}
 
+	send_snapshot(view: DataView) {
+		const lastInputSeqIndex = PacketSize.TYPE + PacketSize.SERVER_TICK + PacketSize.ENTITIES_COUNT;
+		view.setUint32(lastInputSeqIndex, this.last_seq);
+
+		this.send(view.buffer as ArrayBuffer);
+	}
+
 	login() {
-		if (this.roomId) return;
+		if (this.room_id) return;
 		RoomManagerInstance
 			.getRoom("default")
-			?.addPlayer(this.id, this);
-		this.roomId = "default";
+			?.add_player(this);
+		this.room_id = "default";
 	}
 
 	logout() {
-		if (!this.roomId) return;
+		if (!this.room_id) return;
 		RoomManagerInstance
-			.getRoom(this.roomId)
-			?.removePlayer(this.id);
-		this.roomId = null;
+			.getRoom(this.room_id)
+			?.remove_player(this.id);
+		this.room_id = null;
 	}
 
-	private handleInput(buffer: ArrayBuffer) {
-		const raw = decodeInput(buffer);
+	private handle_input(buffer: ArrayBuffer) {
+		const raw = decode_input(buffer);
 
 		// Zod validation (anti-cheat + safety)
 		const parsed = InputSchema.safeParse(raw);
@@ -86,16 +93,16 @@ export class Client {
 		const input = parsed.data;
 
 		// Drop old / duplicated inputs
-		if (input.seq <= this.lastSeq) return;
-		this.lastSeq = input.seq;
+		if (input.seq <= this.last_seq) return;
+		this.last_seq = input.seq;
 
-		this.inputQueue.push(input);
+		this.input_queue.push(input);
 	}
 
 	// called from GameLoop
-	consumeInputs(tick: number): InputPacket[] {
-		const inputs = this.inputQueue;
-		this.inputQueue = [];
+	consume_inputs(): InputPacket[] {
+		const inputs = this.input_queue;
+		this.input_queue = [];
 		return inputs;
 	}
 
@@ -106,7 +113,7 @@ export class Client {
 		}
 	}
 
-	onClose() {
+	on_close() {
 		console.log(`Client disconnected: ${this.id}`);
 		// cleanup handled by Room
 

@@ -22,9 +22,12 @@ class GameLoop {
 	}
 
 	update(deltaTime: number) {
+		// console.log(`[✅ GameLoop] Updating game world with deltaTime: ${deltaTime.toFixed(4)} seconds`);
 		// Update game world, physics, entities, etc.
 		RoomManagerInstance.update(deltaTime);
 	}
 }
 
-export { GameLoop };
+const GameLoopInstance = new GameLoop();
+
+export { GameLoop, GameLoopInstance };

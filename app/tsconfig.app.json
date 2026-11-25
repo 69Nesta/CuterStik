@@ -8,7 +8,7 @@
     "strict": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "erasableSyntaxOnly": true,
+    "erasableSyntaxOnly": false,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
     "paths": {
@@ -16,7 +16,9 @@
       "@engine/*": ["./src/engine/*"],
       "@types/*": ["./src/@types/*"],
       "@utils/*": ["./src/utils/*"],
-      "@/*": ["./src/*"]
+      "@/*": ["./src/*"],
+	  "@project/shared/*": ["../shared/src/*"],
+	  "@shared/packets/*": ["../shared/src/packets/*"],
     }
   },
   "include": ["src/**/*.ts", "src/**/*.tsx", "src/**/*.vue"]

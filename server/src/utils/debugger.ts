@@ -1,16 +1,20 @@
-class Debbuger {
+import Bun from "bun";
+
+class Debugger {
 	public name: string;
+	public color: string;
 	private colors = {
-		reset: "\x1b[0m",
-		info: "\x1b[36m", // cyan
-		error: "\x1b[31m", // red
-		warn: "\x1b[33m", // yellow
-		debug: "\x1b[35m", // magenta
+		reset: '\x1b[0m',
+		info: Bun.color("cyan", 'ansi')!,
+		error: Bun.color("red", 'ansi')!,
+		warn: Bun.color("yellow", 'ansi')!,
+		debug: Bun.color("gray", 'ansi')!,
 	};
 
-	constructor(name: string = 'Main') {
+	constructor(name: string = 'Main', color: string) {
 		this.name = name;
-		this.log('Debbuger initialized');
+		this.color = Bun.color(color, 'ansi')!;
+		this.log('Debugger initialized');
 	}
 
 	private timestamp(): string {
@@ -19,7 +23,7 @@ class Debbuger {
 	}
 
 	private format(level: string, message: string, color: string) {
-		return `${color}${this.timestamp()} [${this.name}] [${level.toUpperCase()}] ${message}${this.colors.reset}`;
+		return `${color}[${level.toUpperCase()}] [${this.color}${this.name}${color}] ${message}${this.colors.reset}`;
 	}
 
 	log(message: string) {
@@ -35,4 +39,4 @@ class Debbuger {
 	}
 }
 
-export { Debbuger };
+export { Debugger };
