@@ -11,6 +11,8 @@ export type Settings = {
   // Mouse
   sensitivity: number
   invertY: boolean
+  /** Master volume, 0..1. */
+  volume: number
   // Video
   quality: Quality
   shadows: boolean
@@ -46,6 +48,7 @@ export type PerfMode = 'off' | 'fps' | 'graph'
 export const DEFAULT_SETTINGS: Settings = {
   sensitivity: 2.2,
   invertY: false,
+  volume: 0.6,
   quality: 'balanced',
   shadows: true,
   speedFov: true,

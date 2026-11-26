@@ -1,13 +1,19 @@
 // WebSocket session: handshake, snapshot handling, prediction reconcile.
-import { C, LocalSim, decodeServer, encodeHello } from '../wasm'
+import { BOMB_SITES, BUY_ZONES, C, LocalSim, WEAPONS, decodeServer, encodeBuy, encodeHello } from '../wasm'
 import { addTracer, noteAck, resetWorld, world } from '../game/world'
-import { patchHud, useHud, type KillfeedEntry, type PhaseLabel } from '../game/store'
+import { patchHud, useHud, type BombHud, type KillfeedEntry, type PhaseLabel } from '../game/store'
+import { sfx } from '../game/audio'
+import { onBuy } from '../game/input'
 import {
   teamName,
+  type Arsenal,
+  type BuyItem,
   type GameEvent,
   type MatchWinner,
   type PlayerId,
   type PlayerInfo,
+  type PlayerSnap,
+  type RoundEndReason,
   type RoomRequest,
   type Snapshot,
   type Team,
@@ -51,6 +57,11 @@ export function startSession(name: string, room: RoomRequest, team: Team | null)
   }
 }
 
+export function buy(item: BuyItem) {
+  world.send?.(asBuffer(encodeBuy(item)))
+}
+onBuy(buy)
+
 export function stopSession() {
   const socket = ws
   ws = null
@@ -71,7 +82,7 @@ function onMessage(bytes: Uint8Array) {
   if ('Welcome' in msg) {
     const { your_id, room_id, room_name, mode, roster: players } = msg.Welcome
     world.myId = your_id
-    world.sim = new LocalSim()
+    world.sim = new LocalSim(your_id)
     roster.clear()
     for (const p of players) roster.set(p.id, p)
     useHud.setState({
@@ -111,40 +122,41 @@ function onSnapshot(snap: Snapshot) {
 
   const me = world.myId !== null ? players.get(world.myId) : undefined
   world.me = me ?? null
-  if (me && world.sim) {
+  if (me && world.sim && snap.you) {
     if (me.spawn_id !== world.lastSpawnId) {
       world.lastSpawnId = me.spawn_id
-      world.sim.teleport(me.pos.x, me.pos.y, me.pos.z)
+      world.sim.teleport(me.mv, snap.you)
       world.yaw = me.yaw
       world.pitch = me.pitch
     } else if (me.alive) {
-      world.sim.reconcile(
-        snap.ack_seq,
-        me.pos.x, me.pos.y, me.pos.z,
-        me.vel.x, me.vel.y, me.vel.z,
-        me.on_ground,
-        me.slide,
-        me.slide_cooldown,
-        me.slide_held,
-      )
+      world.sim.reconcile(snap.ack_seq, me.mv, snap.you)
     }
+    world.arsenal = world.sim.arsenal() as Arsenal
   }
 
   updateHud(snap, now)
 }
 
 function onEvent(ev: GameEvent, now: number) {
+  const me = world.myId
   if ('Joined' in ev) {
     roster.set(ev.Joined.id, ev.Joined)
   } else if ('Left' in ev) {
     roster.delete(ev.Left.id)
   } else if ('Shot' in ev) {
-    const { shooter, from, to, hit } = ev.Shot
-    // Our own tracers are drawn immediately when we fire.
-    if (shooter !== world.myId) addTracer(from, to, false)
-    else if (hit != null) useHud.setState({ hitmarkerAt: now })
+    const { shooter, weapon, from, to, hit } = ev.Shot
+    // Our own tracers and sounds are played as we fire (predicted).
+    if (shooter !== me) {
+      addTracer(from, to, false)
+      sfx.shot(weapon, from)
+      if (hit === me) sfx.hurt()
+    } else if (hit != null) {
+      useHud.setState({ hitmarkerAt: now })
+      // The headshot ding comes with the kill event when it kills.
+      sfx.hit(false)
+    }
   } else if ('Kill' in ev) {
-    const { killer, victim, headshot } = ev.Kill
+    const { killer, victim, headshot, weapon } = ev.Kill
     const k = roster.get(killer)
     const v = roster.get(victim)
     const entry: KillfeedEntry = {
@@ -154,11 +166,32 @@ function onEvent(ev: GameEvent, now: number) {
       victim: v?.name ?? '?',
       victimTeam: v?.team,
       headshot,
+      weapon: weapon ? WEAPONS[weapon].name : null,
       at: now,
     }
     useHud.setState((s) => ({ killfeed: [...s.killfeed, entry].slice(-5) }))
+    if (killer === me && victim !== me) {
+      sfx.kill()
+      if (headshot) sfx.hit(true)
+    }
   } else if ('RoundStart' in ev) {
     showBanner(`Round ${ev.RoundStart.round}`)
+    sfx.jingle('start')
+  } else if ('BombPlanted' in ev) {
+    const site = BOMB_SITES[ev.BombPlanted.site]?.label ?? '?'
+    showBanner(`Bomb planted at ${site}`, 3000)
+    sfx.bombState(true)
+  } else if ('BombDefused' in ev) {
+    sfx.bombState(false)
+  } else if ('BombExploded' in ev) {
+    world.explosions.push({ pos: ev.BombExploded.pos, born: now })
+    sfx.explosion(ev.BombExploded.pos)
+  } else if ('BombPickedUp' in ev) {
+    if (ev.BombPickedUp.by === me) showBanner('You picked up the bomb', 2000)
+  } else if ('BombDropped' in ev) {
+    if (useHud.getState().myTeam === 'T') showBanner('The bomb was dropped', 2000)
+  } else if ('Bought' in ev) {
+    if (ev.Bought.by === me) sfx.buy()
   }
 }
 
@@ -181,19 +214,31 @@ function updateHud(snap: Snapshot, now: number) {
   const winner = typeof p === 'object' && 'RoundEnd' in p ? p.RoundEnd.winner : null
 
   if (phase !== lastPhase) {
-    if (winner) {
-      showBanner(winner === 'T' ? 'Attackers win the round' : 'Defenders win the round', 3500)
+    if (typeof p === 'object' && 'RoundEnd' in p) {
+      showBanner(roundBanner(p.RoundEnd.winner, p.RoundEnd.reason), 3500)
+      if (me) sfx.jingle(me.team === p.RoundEnd.winner ? 'win' : 'lose')
     } else if (typeof p === 'object' && 'MatchEnd' in p) {
       showBanner(matchBanner(p.MatchEnd.winner), 7000)
     }
   }
   lastPhase = phase
 
+  const arsenal = world.arsenal
+  const gun =
+    arsenal && (arsenal.active === 'Primary' && arsenal.primary ? arsenal.primary : arsenal.secondary)
   patchHud({
     myTeam: me?.team ?? null,
     health: me?.health ?? 0,
-    ammo: me?.ammo ?? 0,
-    reloading: me?.reloading ?? false,
+    armor: me?.armor ?? 0,
+    helmet: me?.helmet ?? false,
+    money: me?.money ?? 0,
+    weapon: gun?.id ?? 'Pistol',
+    ammo: gun?.ammo ?? 0,
+    reserve: gun?.reserve ?? 0,
+    reloading: (arsenal?.reload_left ?? 0) > 0,
+    zoomed: arsenal?.zoomed ?? false,
+    canBuy: snap.buy_open && inBuyZone(me ?? undefined),
+    bomb: bombHud(snap, me ?? undefined),
     alive: me?.alive ?? false,
     spawned: (me?.spawn_id ?? 0) > 0,
     phase,
@@ -232,6 +277,58 @@ function updateHud(snap: Snapshot, now: number) {
   if (feed.length && now - feed[0].at > KILLFEED_MS) {
     useHud.setState({ killfeed: feed.filter((k) => now - k.at <= KILLFEED_MS) })
   }
+}
+
+function roundBanner(winner: Team, reason: RoundEndReason) {
+  const side = winner === 'T' ? 'Attackers win' : 'Defenders win'
+  switch (reason) {
+    case 'BombExploded':
+      return `Bomb exploded. ${side}`
+    case 'BombDefused':
+      return `Bomb defused. ${side}`
+    case 'TimeUp':
+      return `Time's up. ${side}`
+    default:
+      return `${side} the round`
+  }
+}
+
+/** Buying needs you inside your team's zone (anywhere in respawn modes). */
+function inBuyZone(me: PlayerSnap | undefined) {
+  if (!me?.alive) return false
+  const mode = useHud.getState().room?.mode
+  if (mode !== 'Elimination' || useHud.getState().phase === 'Warmup') return true
+  return inOwnBuyZone(me)
+}
+
+function inOwnBuyZone(me: PlayerSnap) {
+  const { x, z } = me.mv.pos
+  return BUY_ZONES.some(
+    (b) => b.team === me.team && x >= b.min_x && x <= b.max_x && z >= b.min_z && z <= b.max_z,
+  )
+}
+
+function bombHud(snap: Snapshot, me: PlayerSnap | undefined): BombHud {
+  const b = snap.bomb
+  if (typeof b === 'string' || !me) return { kind: 'none' }
+  if ('Carried' in b) {
+    if (b.Carried.by !== me.id) return { kind: 'none' }
+    const { x, z } = me.mv.pos
+    const inSite = BOMB_SITES.some((s) => Math.hypot(x - s.x, z - s.z) <= s.radius)
+    return { kind: 'carrying', inSite, planting: b.Carried.planting }
+  }
+  if ('Dropped' in b) return me.team === 'T' ? { kind: 'dropped' } : { kind: 'none' }
+  if ('Planted' in b) {
+    const { site, left, defuser, defusing } = b.Planted
+    return {
+      kind: 'planted',
+      site: BOMB_SITES[site]?.label ?? '?',
+      left,
+      defusing,
+      defusingMe: defuser === me.id,
+    }
+  }
+  return { kind: 'none' }
 }
 
 function matchBanner(w: MatchWinner) {

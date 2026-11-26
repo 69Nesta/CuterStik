@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from 'react'
-import { C } from '../wasm'
+import { C, WEAPONS } from '../wasm'
 import { useHud } from '../game/store'
+import { BUY_MENU, openBuyMenu } from '../game/input'
+import { buy } from '../net/session'
 import { CrosshairShape } from './Crosshair'
 import { Minimap } from './Minimap'
 import { PerfOverlay } from './PerfOverlay'
 import { SettingsPanel } from './SettingsPanel'
 import { world } from '../game/world'
 import { stopSession } from '../net/session'
-import { hasTeams, modeName, teamName, type GameMode, type Team } from '../net/protocol'
+import { hasTeams, modeName, teamName, type BuyItem, type GameMode, type Team } from '../net/protocol'
 
 const teamClass = (t?: Team | null) => (t === 'T' ? 'team-t' : t === 'Ct' ? 'team-ct' : '')
 
@@ -25,8 +27,9 @@ function goalText(mode: GameMode) {
 }
 
 function TopBar() {
-  const { phase, timeLeft, round, scoreT, scoreCt, myKills, topKills } = useHud()
+  const { phase, timeLeft, round, scoreT, scoreCt, myKills, topKills, bomb } = useHud()
   const mode = useMode()
+  const planted = bomb.kind === 'planted' && phase === 'Live'
   const label =
     phase === 'Warmup'
       ? mode === 'Deathmatch'
@@ -42,9 +45,9 @@ function TopBar() {
               ? `Round ${round}`
               : goalText(mode)
   const clock = (
-    <div className="clock">
+    <div className={`clock ${planted ? 'bomb' : ''}`}>
       <div className="time">{phase === 'Warmup' ? '--:--' : formatTime(timeLeft)}</div>
-      <div className="phase">{label}</div>
+      <div className="phase">{planted ? `Bomb planted at ${bomb.site}` : label}</div>
     </div>
   )
   if (!hasTeams(mode)) {
@@ -67,6 +70,7 @@ function TopBar() {
 }
 
 function Crosshair() {
+  const zoomed = useHud((s) => s.zoomed)
   const hitAt = useHud((s) => s.hitmarkerAt)
   const [hit, setHit] = useState(false)
   useEffect(() => {
@@ -75,27 +79,152 @@ function Crosshair() {
     const t = setTimeout(() => setHit(false), 150)
     return () => clearTimeout(t)
   }, [hitAt])
+  // The scope has its own reticle.
+  if (zoomed) return null
   return <CrosshairShape hit={hit} />
 }
 
 function Vitals() {
-  const { health, ammo, reloading, alive, myTeam } = useHud()
+  const { health, armor, helmet, ammo, reserve, weapon, reloading, alive, myTeam, money } = useHud()
   const mode = useMode()
   if (!alive) return null
   return (
     <>
-      <div className={`vitals health ${health <= 25 ? 'low' : ''}`}>
-        <span className="icon">✚</span>
-        {health}
+      <div className="vitals-left">
+        {mode === 'Elimination' && <div className="money">${money}</div>}
+        <div className="vitals-row">
+          <div className={`vitals health ${health <= 25 ? 'low' : ''}`}>
+            <span className="icon">✚</span>
+            {health}
+          </div>
+          {armor > 0 && (
+            <div className="vitals armor" title={helmet ? 'Kevlar + helmet' : 'Kevlar'}>
+              <span className="icon">{helmet ? '⛑' : '⛨'}</span>
+              {armor}
+            </div>
+          )}
+        </div>
       </div>
       <div className="vitals ammo">
+        <span className="weapon-name">{WEAPONS[weapon].name}</span>
         {reloading ? <span className="reloading">RELOADING</span> : ammo}
-        <span className="mag">/ {C.mag_size}</span>
+        <span className="mag">/ {reserve}</span>
       </div>
       <div className={`team-badge ${hasTeams(mode) ? teamClass(myTeam) : 'ffa'}`}>
         {hasTeams(mode) ? myTeam && teamName(myTeam) : 'Free for all'}
       </div>
     </>
+  )
+}
+
+/** Plant / defuse prompts and progress. */
+function BombStatus() {
+  const { bomb, alive, phase, myTeam } = useHud()
+  if (!alive || bomb.kind === 'none') return null
+  let text: string | null = null
+  let progress: number | null = null
+  if (bomb.kind === 'carrying') {
+    if (bomb.planting > 0) {
+      text = 'Planting…'
+      progress = bomb.planting
+    } else {
+      text = bomb.inSite && phase === 'Live' ? 'Hold E to plant' : 'You have the bomb: plant it at A or B'
+    }
+  } else if (bomb.kind === 'dropped') {
+    text = 'The bomb is on the ground: pick it up'
+  } else if (bomb.kind === 'planted') {
+    if (bomb.defusingMe) {
+      text = 'Defusing…'
+      progress = bomb.defusing
+    } else if (myTeam === 'Ct') {
+      text = bomb.defusing > 0 ? 'A teammate is defusing' : `Defuse the bomb at ${bomb.site} (hold E)`
+    }
+  }
+  if (!text) return null
+  return (
+    <div className="bomb-status">
+      <span className="bomb-icon" aria-hidden>
+        ●
+      </span>
+      {text}
+      {progress !== null && (
+        <div className="track">
+          <div className="fill" style={{ transform: `scaleX(${Math.min(progress, 1)})` }} />
+        </div>
+      )}
+    </div>
+  )
+}
+
+function itemName(item: BuyItem) {
+  if (item === 'Kevlar') return 'Kevlar'
+  if (item === 'KevlarHelmet') return 'Kevlar + Helmet'
+  return WEAPONS[item.Weapon].name
+}
+
+function itemPrice(item: BuyItem, armor: number, helmet: boolean) {
+  if (item === 'Kevlar') return C.kevlar_price
+  if (item === 'KevlarHelmet')
+    return armor >= C.max_armor && !helmet ? C.kevlar_helmet_price - C.kevlar_price : C.kevlar_helmet_price
+  return WEAPONS[item.Weapon].price
+}
+
+function BuyMenu() {
+  const { buyOpen, canBuy, money, armor, helmet, room, phase } = useHud()
+  const free = room?.mode !== 'Elimination' || phase === 'Warmup'
+  useEffect(() => {
+    if (buyOpen && !canBuy) openBuyMenu(false)
+  }, [buyOpen, canBuy])
+  if (!buyOpen) return null
+  return (
+    <div className="buy-menu" onClick={(e) => e.stopPropagation()}>
+      <div className="card">
+        <header>
+          <h2>Buy</h2>
+          <span className="money">{free ? 'Free loadout' : `$${money}`}</span>
+        </header>
+        <div className="buy-grid">
+          {BUY_MENU.map(({ item, key }) => {
+            const price = itemPrice(item, armor, helmet)
+            const owned =
+              (item === 'Kevlar' && armor >= C.max_armor) ||
+              (item === 'KevlarHelmet' && armor >= C.max_armor && helmet)
+            const afford = free || money >= price
+            const spec = typeof item === 'object' ? WEAPONS[item.Weapon] : null
+            return (
+              <button key={key} className="buy-item" disabled={!afford || owned} onClick={() => buy(item)}>
+                <kbd>{key}</kbd>
+                <span className="name">{itemName(item)}</span>
+                <span className="price">{free ? 'free' : `$${price}`}</span>
+                {spec && (
+                  <span className="stats">
+                    {spec.mag} rounds · {Math.round(60 / spec.fire_interval)} rpm · {spec.body_damage} dmg
+                    {spec.scoped_spread != null && ' · scope'}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        <p className="hint">
+          Number keys buy · <kbd>B</kbd> closes
+        </p>
+        <button className="play close" onClick={() => openBuyMenu(false)}>
+          Back to the game
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function ScopeOverlay() {
+  const zoomed = useHud((s) => s.zoomed && s.alive)
+  if (!zoomed) return null
+  return (
+    <div className="scope" aria-hidden>
+      <i className="h" />
+      <i className="v" />
+    </div>
   )
 }
 
@@ -106,7 +235,10 @@ function Killfeed() {
       {feed.map((k) => (
         <div key={k.key} className="kill">
           <span className={teamClass(k.killerTeam)}>{k.killer}</span>
-          <span className="weapon">{k.headshot ? '⌖ HS' : '▸'}</span>
+          <span className="weapon">
+            {k.weapon ?? 'Bomb'}
+            {k.headshot && ' ⌖'}
+          </span>
           <span className={teamClass(k.victimTeam)}>{k.victim}</span>
         </div>
       ))}
@@ -189,7 +321,7 @@ function requestLock() {
 }
 
 function StatusOverlay() {
-  const { alive, spawned, phase, locked, banner, room, settingsOpen } = useHud()
+  const { alive, spawned, phase, locked, banner, room, settingsOpen, buyOpen } = useHud()
   const mode = useMode()
   let msg: string | null = null
   if (!alive && phase !== 'MatchEnd') {
@@ -207,7 +339,7 @@ function StatusOverlay() {
       {!locked && settingsOpen && (
         <SettingsPanel onClose={() => useHud.setState({ settingsOpen: false })} />
       )}
-      {!locked && !settingsOpen && (
+      {!locked && !settingsOpen && !buyOpen && (
         <div className="paused">
           <div className="card">
             {room && (
@@ -217,11 +349,13 @@ function StatusOverlay() {
             )}
             <h2>Paused</h2>
             <p>
-              <kbd>W A S D</kbd> move · <kbd>Space</kbd> jump · <kbd>Shift</kbd> sprint
+              <kbd>W A S D</kbd> move · <kbd>Space</kbd> jump · <kbd>Shift</kbd> sprint · <kbd>Alt</kbd> walk
               <br />
-              <kbd>C</kbd> slide (while sprinting) · <kbd>Alt</kbd> walk
+              <kbd>C</kbd> crouch (slide while running) · <kbd>E</kbd> plant / defuse
               <br />
-              <kbd>Mouse</kbd> aim & shoot · <kbd>R</kbd> reload · <kbd>Tab</kbd> scores
+              <kbd>Mouse</kbd> shoot · <kbd>Right</kbd> scope · <kbd>R</kbd> reload
+              <br />
+              <kbd>1</kbd> <kbd>2</kbd> <kbd>Q</kbd> weapons · <kbd>B</kbd> buy · <kbd>Tab</kbd> scores
             </p>
             <button className="play" autoFocus onClick={requestLock}>
               Play
@@ -244,8 +378,6 @@ function StatusOverlay() {
   )
 }
 
-/** Fills back up while the slide is on cooldown. */
-const SLIDE_COOLDOWN = 1.4 // keep in sync with shared/src/constants.rs
 
 function SlideMeter() {
   const alive = useHud((s) => s.alive)
@@ -255,7 +387,8 @@ function SlideMeter() {
     const tick = () => {
       const me = world.me
       if (fill.current && me) {
-        const ready = 1 - Math.min(me.slide_cooldown / SLIDE_COOLDOWN, 1)
+        // Fills back up while the slide is on cooldown.
+        const ready = 1 - Math.min(me.mv.slide_cooldown / C.slide_cooldown, 1)
         fill.current.style.transform = `scaleX(${ready})`
         fill.current.parentElement!.classList.toggle('ready', ready >= 1)
       }
@@ -280,12 +413,15 @@ export function GameHud() {
     <div className="hud">
       <TopBar />
       <Minimap />
+      <ScopeOverlay />
       <Crosshair />
       <Vitals />
+      <BombStatus />
       <SlideMeter />
       <Killfeed />
       <Scoreboard />
       <StatusOverlay />
+      <BuyMenu />
       <PerfOverlay />
     </div>
   )

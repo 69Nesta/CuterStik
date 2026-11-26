@@ -1,7 +1,10 @@
 // Mutable game state read by the scene every frame. Written by the network
 // session; never put in React state.
 import type { LocalSim } from '../wasm'
-import type { PlayerId, PlayerSnap, Snapshot, Vec3 } from '../net/protocol'
+import type { Arsenal, PlayerId, PlayerSnap, Snapshot, Vec3 } from '../net/protocol'
+
+/** Remote players are drawn this far in the past (interpolation). */
+export const INTERP_DELAY_MS = 100
 
 export type BufferedSnapshot = {
   /** Server time in ms (tick * dt). */
@@ -17,6 +20,8 @@ export const world = {
   latest: null as Snapshot | null,
   me: null as PlayerSnap | null,
   lastSpawnId: -1,
+  /** Predicted weapons of the local player (ammo, timers, weapon out). */
+  arsenal: null as Arsenal | null,
 
   /** View angles, owned by the client (mouse look). */
   yaw: 0,
@@ -28,6 +33,8 @@ export const world = {
   clockOffset: null as number | null,
 
   tracers: [] as Tracer[],
+  /** Bomb explosions: position and start time, for the effect. */
+  explosions: [] as { pos: Vec3; born: number }[],
   /** Visual recoil kick, decays to 0. */
   recoil: 0,
   muzzleFlashAt: 0,
@@ -49,6 +56,8 @@ export function resetWorld() {
   world.latest = null
   world.me = null
   world.lastSpawnId = -1
+  world.arsenal = null
+  world.explosions = []
   world.buffer = []
   world.clockOffset = null
   world.tracers = []
@@ -86,4 +95,10 @@ export function noteAck(ack: number) {
 export function addTracer(from: Vec3, to: Vec3, local: boolean) {
   world.tracers.push({ from, to, born: performance.now(), local })
   if (world.tracers.length > 64) world.tracers.shift()
+}
+
+/** Server time currently shown for remote players, in ticks (or null). */
+export function viewTick(tickMs: number) {
+  if (world.clockOffset === null) return null
+  return (performance.now() - world.clockOffset - INTERP_DELAY_MS) / tickMs
 }

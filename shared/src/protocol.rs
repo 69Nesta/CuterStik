@@ -8,8 +8,10 @@ use alloc::vec::Vec;
 use serde::{Deserialize, Serialize};
 
 use crate::math::Vec3;
+use crate::movement::MoveState;
+use crate::weapons::{Arsenal, WeaponId};
 
-pub const PROTOCOL_VERSION: u16 = 3;
+pub const PROTOCOL_VERSION: u16 = 4;
 
 pub type RoomId = u32;
 
@@ -32,17 +34,25 @@ impl Team {
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(transparent)]
-pub struct Buttons(pub u8);
+pub struct Buttons(pub u16);
 
 impl Buttons {
-    pub const JUMP: u8 = 1 << 0;
-    pub const FIRE: u8 = 1 << 1;
-    pub const RELOAD: u8 = 1 << 2;
-    pub const WALK: u8 = 1 << 3;
-    pub const SPRINT: u8 = 1 << 4;
-    pub const SLIDE: u8 = 1 << 5;
+    pub const JUMP: u16 = 1 << 0;
+    pub const FIRE: u16 = 1 << 1;
+    pub const RELOAD: u16 = 1 << 2;
+    pub const WALK: u16 = 1 << 3;
+    pub const SPRINT: u16 = 1 << 4;
+    /// Crouch; pressed at speed it slides instead.
+    pub const CROUCH: u16 = 1 << 5;
+    /// Plant / defuse the bomb (hold).
+    pub const USE: u16 = 1 << 6;
+    /// Scope in (hold), sniper only.
+    pub const ZOOM: u16 = 1 << 7;
+    /// Switch to the primary / secondary weapon.
+    pub const SLOT1: u16 = 1 << 8;
+    pub const SLOT2: u16 = 1 << 9;
 
-    pub fn has(self, flag: u8) -> bool {
+    pub fn has(self, flag: u16) -> bool {
         self.0 & flag != 0
     }
 }
@@ -58,6 +68,20 @@ pub struct InputCmd {
     pub buttons: Buttons,
     pub yaw: f32,
     pub pitch: f32,
+    /// Server time the client was looking at when this input was made, in
+    /// 1/16 ticks: the interpolated past it renders remote players in. The
+    /// server rewinds hitboxes to it (lag compensation).
+    pub view_time: u32,
+}
+
+/// Fixed-point scale of `InputCmd::view_time`.
+pub const VIEW_TIME_SCALE: f32 = 16.0;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum BuyItem {
+    Weapon(WeaponId),
+    Kevlar,
+    KevlarHelmet,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -84,9 +108,14 @@ impl GameMode {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum RoomRequest {
     /// Any room of this mode with space; a new one is opened if all are full.
-    Quick { mode: GameMode },
+    Quick {
+        mode: GameMode,
+    },
     Join(RoomId),
-    Create { name: String, mode: GameMode },
+    Create {
+        name: String,
+        mode: GameMode,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -99,6 +128,7 @@ pub enum ClientMsg {
         team: Option<Team>,
     },
     Input(InputCmd),
+    Buy(BuyItem),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -107,9 +137,22 @@ pub enum Phase {
     Warmup,
     Freeze,
     Live,
-    RoundEnd { winner: Team },
+    RoundEnd {
+        winner: Team,
+        reason: RoundEndReason,
+    },
     /// Match decided; a new one starts when the timer runs out.
-    MatchEnd { winner: MatchWinner },
+    MatchEnd {
+        winner: MatchWinner,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum RoundEndReason {
+    Eliminated,
+    BombExploded,
+    BombDefused,
+    TimeUp,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -130,19 +173,19 @@ pub struct PlayerInfo {
 pub struct PlayerSnap {
     pub id: PlayerId,
     pub team: Team,
-    pub pos: Vec3,
-    pub vel: Vec3,
-    pub on_ground: bool,
-    /// Slide state, needed to replay predicted inputs exactly.
-    pub slide: f32,
-    pub slide_cooldown: f32,
-    pub slide_held: bool,
+    /// Full movement state, needed to replay predicted inputs exactly.
+    pub mv: MoveState,
     pub yaw: f32,
     pub pitch: f32,
     pub health: u8,
+    pub armor: u8,
+    pub helmet: bool,
     pub alive: bool,
-    pub ammo: u8,
+    /// Weapon in hand.
+    pub weapon: WeaponId,
     pub reloading: bool,
+    pub zoomed: bool,
+    pub money: u16,
     pub kills: u16,
     pub deaths: u16,
     /// Increments on every (re)spawn so the client knows to snap its
@@ -150,13 +193,77 @@ pub struct PlayerSnap {
     pub spawn_id: u16,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum BombState {
+    /// Not in play (not Elimination, or between rounds).
+    Inactive,
+    /// `planting` is the plant progress, 0..1.
+    Carried {
+        by: PlayerId,
+        planting: f32,
+    },
+    Dropped {
+        pos: Vec3,
+    },
+    /// `defusing` is the defuse progress, 0..1, and who is at it.
+    Planted {
+        pos: Vec3,
+        site: u8,
+        left: f32,
+        defuser: Option<PlayerId>,
+        defusing: f32,
+    },
+    Exploded {
+        pos: Vec3,
+    },
+    Defused {
+        pos: Vec3,
+    },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum GameEvent {
     Joined(PlayerInfo),
-    Left { id: PlayerId },
-    Shot { shooter: PlayerId, from: Vec3, to: Vec3, hit: Option<PlayerId> },
-    Kill { killer: PlayerId, victim: PlayerId, headshot: bool },
-    RoundStart { round: u16 },
+    Left {
+        id: PlayerId,
+    },
+    Shot {
+        shooter: PlayerId,
+        weapon: WeaponId,
+        from: Vec3,
+        to: Vec3,
+        hit: Option<PlayerId>,
+    },
+    /// `weapon` is None for the bomb.
+    Kill {
+        killer: PlayerId,
+        victim: PlayerId,
+        headshot: bool,
+        weapon: Option<WeaponId>,
+    },
+    RoundStart {
+        round: u16,
+    },
+    BombPlanted {
+        by: PlayerId,
+        site: u8,
+    },
+    BombDefused {
+        by: PlayerId,
+    },
+    BombExploded {
+        pos: Vec3,
+    },
+    BombPickedUp {
+        by: PlayerId,
+    },
+    BombDropped {
+        pos: Vec3,
+    },
+    Bought {
+        by: PlayerId,
+        item: BuyItem,
+    },
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -169,7 +276,12 @@ pub struct Snapshot {
     pub round: u16,
     pub score_t: u16,
     pub score_ct: u16,
+    /// Elimination: whether buying is still open this round.
+    pub buy_open: bool,
+    pub bomb: BombState,
     pub players: Vec<PlayerSnap>,
+    /// The receiving player's own weapons, for prediction.
+    pub you: Option<Arsenal>,
     pub events: Vec<GameEvent>,
 }
 
@@ -184,7 +296,9 @@ pub enum ServerMsg {
         roster: Vec<PlayerInfo>,
     },
     Snapshot(Snapshot),
-    Rejected { reason: String },
+    Rejected {
+        reason: String,
+    },
 }
 
 pub fn encode<T: Serialize>(msg: &T) -> Vec<u8> {
@@ -231,12 +345,13 @@ mod tests {
             seq: 42,
             forward: 1,
             right: -1,
-            buttons: Buttons(Buttons::FIRE | Buttons::JUMP),
+            buttons: Buttons(Buttons::FIRE | Buttons::JUMP | Buttons::SLOT2),
             yaw: 1.5,
             pitch: -0.25,
+            view_time: 64 * 60 * 30 * 16,
         };
         let bytes = encode(&ClientMsg::Input(cmd));
-        assert!(bytes.len() < 16, "input is {} bytes", bytes.len());
+        assert!(bytes.len() <= 20, "input is {} bytes", bytes.len());
         match decode::<ClientMsg>(&bytes).unwrap() {
             ClientMsg::Input(c) => assert_eq!(c, cmd),
             other => panic!("unexpected {other:?}"),

@@ -5,7 +5,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::constants::*;
-use crate::map::MAP;
+use crate::map::colliders;
 use crate::math::{Aabb, Vec3};
 use crate::protocol::{Buttons, InputCmd};
 
@@ -19,8 +19,10 @@ pub struct MoveState {
     pub slide: f32,
     /// Seconds until a new slide may start.
     pub slide_cooldown: f32,
-    /// Slide button state last tick, so a slide starts on press only.
+    /// Crouch button state last tick, so a slide starts on press only.
     pub slide_held: bool,
+    /// Short collision box (crouching or sliding).
+    pub crouched: bool,
 }
 
 impl MoveState {
@@ -28,29 +30,49 @@ impl MoveState {
         self.slide > 0.0
     }
 
-    pub fn eye_height(&self) -> f32 {
-        if self.sliding() { SLIDE_EYE_HEIGHT } else { EYE_HEIGHT }
+    pub fn height(&self) -> f32 {
+        if self.crouched {
+            CROUCH_HEIGHT
+        } else {
+            PLAYER_HEIGHT
+        }
     }
 
-    fn horizontal_speed(&self) -> f32 {
+    pub fn eye_height(&self) -> f32 {
+        if self.sliding() {
+            SLIDE_EYE_HEIGHT
+        } else if self.crouched {
+            CROUCH_EYE_HEIGHT
+        } else {
+            EYE_HEIGHT
+        }
+    }
+
+    pub fn horizontal_speed(&self) -> f32 {
         libm::sqrtf(self.vel.x * self.vel.x + self.vel.z * self.vel.z)
     }
 }
 
-pub fn player_bounds(pos: Vec3) -> Aabb {
+pub fn player_bounds(pos: Vec3, height: f32) -> Aabb {
     Aabb::new(
         Vec3::new(pos.x - PLAYER_HALF_WIDTH, pos.y, pos.z - PLAYER_HALF_WIDTH),
         Vec3::new(
             pos.x + PLAYER_HALF_WIDTH,
-            pos.y + PLAYER_HEIGHT,
+            pos.y + height,
             pos.z + PLAYER_HALF_WIDTH,
         ),
     )
 }
 
+fn blocked_at(pos: Vec3, height: f32) -> bool {
+    let me = player_bounds(pos, height);
+    colliders().iter().any(|b| me.overlaps(b))
+}
+
 /// Advance one tick. `can_move` is false during freeze time: gravity still
-/// applies but movement input and jumping are ignored.
-pub fn step(state: &MoveState, cmd: &InputCmd, can_move: bool) -> MoveState {
+/// applies but movement input and jumping are ignored. `speed_scale` is the
+/// held weapon's movement multiplier.
+pub fn step(state: &MoveState, cmd: &InputCmd, can_move: bool, speed_scale: f32) -> MoveState {
     let mut s = *state;
 
     let (fwd, right) = if can_move {
@@ -68,27 +90,15 @@ pub fn step(state: &MoveState, cmd: &InputCmd, can_move: bool) -> MoveState {
     if wish_len > 1e-6 {
         wish = wish * (1.0 / wish_len);
     }
-    let walking = cmd.buttons.has(Buttons::WALK);
-    // Sprint: forward only, and firing drops you back to a run.
-    let sprinting = cmd.buttons.has(Buttons::SPRINT)
-        && fwd > 0.0
-        && !walking
-        && !cmd.buttons.has(Buttons::FIRE);
-    let mut wish_speed = match (wish_len > 1e-6, sprinting, walking) {
-        (false, _, _) => 0.0,
-        (true, true, _) => SPRINT_SPEED,
-        (true, false, true) => MAX_SPEED * WALK_SPEED_FACTOR,
-        (true, false, false) => MAX_SPEED,
-    };
 
-    let jump = can_move && cmd.buttons.has(Buttons::JUMP);
-
-    // Slide timers advance every tick, frozen or not.
+    // Crouch / slide share one button: pressed at speed it slides,
+    // otherwise it crouches. Timers advance every tick, frozen or not.
+    let crouch_held = cmd.buttons.has(Buttons::CROUCH);
     s.slide_cooldown = (s.slide_cooldown - DT).max(0.0);
     s.slide = (s.slide - DT).max(0.0);
-    let slide_pressed = can_move && cmd.buttons.has(Buttons::SLIDE);
+    let slide_pressed = can_move && crouch_held;
     let slide_edge = slide_pressed && !s.slide_held;
-    s.slide_held = cmd.buttons.has(Buttons::SLIDE);
+    s.slide_held = crouch_held;
 
     if s.on_ground
         && slide_edge
@@ -108,11 +118,37 @@ pub fn step(state: &MoveState, cmd: &InputCmd, can_move: bool) -> MoveState {
     if s.sliding() && (!slide_pressed || !s.on_ground || s.horizontal_speed() < SLIDE_END_SPEED) {
         s.slide = 0.0;
     }
+    if crouch_held || s.sliding() {
+        s.crouched = true;
+    } else if s.crouched && !blocked_at(s.pos, PLAYER_HEIGHT) {
+        // Stand up only where there's headroom.
+        s.crouched = false;
+    }
+
+    let walking = cmd.buttons.has(Buttons::WALK);
+    // Sprint: forward only, and firing or crouching drops you to a run.
+    let sprinting = cmd.buttons.has(Buttons::SPRINT)
+        && fwd > 0.0
+        && !walking
+        && !s.crouched
+        && !cmd.buttons.has(Buttons::FIRE);
+    let mut wish_speed = if wish_len <= 1e-6 {
+        0.0
+    } else if sprinting {
+        SPRINT_SPEED
+    } else if s.crouched {
+        MAX_SPEED * CROUCH_SPEED_FACTOR
+    } else if walking {
+        MAX_SPEED * WALK_SPEED_FACTOR
+    } else {
+        MAX_SPEED
+    } * speed_scale;
     if s.sliding() {
         // Committed to the slide: only a little steering.
         wish_speed = wish_speed.min(1.0);
     }
 
+    let jump = can_move && cmd.buttons.has(Buttons::JUMP);
     if s.on_ground {
         if jump {
             // Skip friction on the jump tick so bunny hops (and slide
@@ -140,9 +176,15 @@ pub fn step(state: &MoveState, cmd: &InputCmd, can_move: bool) -> MoveState {
         s.vel.y = (s.vel.y - GRAVITY * DT).max(-MAX_FALL_SPEED);
     }
 
-    move_and_collide(&mut s);
+    let was_on_ground = s.on_ground;
+    move_and_collide(&mut s, was_on_ground);
 
-    s.on_ground = s.vel.y <= 0.0 && touching_ground(s.pos);
+    // Stick to the ground walking down stairs and ramps.
+    if was_on_ground && s.vel.y <= 0.0 && !touching_ground(s.pos, s.height()) {
+        snap_down(&mut s);
+    }
+
+    s.on_ground = s.vel.y <= 0.0 && touching_ground(s.pos, s.height());
     if s.on_ground {
         s.vel.y = 0.0;
     }
@@ -184,7 +226,10 @@ fn accelerate(vel: &mut Vec3, wish: Vec3, cap: f32, accel_ref: f32, accel: f32) 
 }
 
 /// Axis-separated move: X, then Z, then Y. Simple and stable against boxes.
-fn move_and_collide(s: &mut MoveState) {
+/// On the ground, a horizontal move blocked only by ledges up to
+/// `STEP_HEIGHT` steps up onto them instead.
+fn move_and_collide(s: &mut MoveState, grounded: bool) {
+    let height = s.height();
     for axis in [0usize, 2, 1] {
         let delta = s.vel.get(axis) * DT;
         if delta == 0.0 {
@@ -193,18 +238,26 @@ fn move_and_collide(s: &mut MoveState) {
         let mut pos = s.pos;
         pos.set(axis, pos.get(axis) + delta);
 
+        if axis != 1
+            && grounded
+            && let Some(top) = step_up_height(pos, height)
+        {
+            s.pos = Vec3::new(pos.x, top, pos.z);
+            continue;
+        }
+
         let mut blocked = false;
-        for m in MAP {
-            let me = player_bounds(pos);
-            if !me.overlaps(&m.bounds) {
+        for b in colliders() {
+            let me = player_bounds(pos, height);
+            if !me.overlaps(b) {
                 continue;
             }
             blocked = true;
             let resolved = match (axis, delta > 0.0) {
-                (1, true) => m.bounds.min.y - PLAYER_HEIGHT,
-                (1, false) => m.bounds.max.y,
-                (_, true) => m.bounds.min.get(axis) - PLAYER_HALF_WIDTH,
-                (_, false) => m.bounds.max.get(axis) + PLAYER_HALF_WIDTH,
+                (1, true) => b.min.y - height,
+                (1, false) => b.max.y,
+                (_, true) => b.min.get(axis) - PLAYER_HALF_WIDTH,
+                (_, false) => b.max.get(axis) + PLAYER_HALF_WIDTH,
             };
             pos.set(axis, resolved);
         }
@@ -215,9 +268,44 @@ fn move_and_collide(s: &mut MoveState) {
     }
 }
 
-fn touching_ground(pos: Vec3) -> bool {
-    let probe = player_bounds(Vec3::new(pos.x, pos.y - 0.01, pos.z));
-    MAP.iter().any(|m| probe.overlaps(&m.bounds))
+/// If everything overlapping `pos` is a low ledge with headroom above,
+/// the feet height to step up to.
+fn step_up_height(pos: Vec3, height: f32) -> Option<f32> {
+    let me = player_bounds(pos, height);
+    let mut top = None::<f32>;
+    for b in colliders() {
+        if !me.overlaps(b) {
+            continue;
+        }
+        let rise = b.max.y - pos.y;
+        if rise <= 0.0 || rise > STEP_HEIGHT {
+            return None;
+        }
+        top = Some(top.map_or(b.max.y, |t| t.max(b.max.y)));
+    }
+    let top = top?;
+    (!blocked_at(Vec3::new(pos.x, top, pos.z), height)).then_some(top)
+}
+
+/// Drop onto ground up to `STEP_HEIGHT` below, if there is any.
+fn snap_down(s: &mut MoveState) {
+    let probe = player_bounds(
+        Vec3::new(s.pos.x, s.pos.y - STEP_HEIGHT, s.pos.z),
+        s.height(),
+    );
+    let ground = colliders()
+        .iter()
+        .filter(|b| probe.overlaps(b) && b.max.y <= s.pos.y)
+        .map(|b| b.max.y)
+        .fold(None::<f32>, |m, y| Some(m.map_or(y, |m| m.max(y))));
+    if let Some(y) = ground {
+        s.pos.y = y;
+    }
+}
+
+fn touching_ground(pos: Vec3, height: f32) -> bool {
+    let probe = player_bounds(Vec3::new(pos.x, pos.y - 0.01, pos.z), height);
+    colliders().iter().any(|b| probe.overlaps(b))
 }
 
 #[cfg(test)]
@@ -225,12 +313,13 @@ mod tests {
     use super::*;
     use crate::protocol::Buttons;
 
-    fn cmd(forward: i8, buttons: u8) -> InputCmd {
+    fn cmd(forward: i8, buttons: u16) -> InputCmd {
         InputCmd {
             seq: 0,
             forward,
             right: 0,
             buttons: Buttons(buttons),
+            view_time: 0,
             yaw: 0.0,
             pitch: 0.0,
         }
@@ -243,7 +332,7 @@ mod tests {
             ..Default::default()
         };
         for _ in 0..200 {
-            s = step(&s, &cmd(0, 0), true);
+            s = step(&s, &cmd(0, 0), true, 1.0);
         }
         assert!(s.on_ground);
         assert_eq!(s.pos.y, 0.0);
@@ -257,7 +346,7 @@ mod tests {
             ..Default::default()
         };
         for _ in 0..64 {
-            s = step(&s, &cmd(1, 0), true);
+            s = step(&s, &cmd(1, 0), true, 1.0);
         }
         assert!(s.pos.z < 26.0);
         let speed = libm::sqrtf(s.vel.x * s.vel.x + s.vel.z * s.vel.z);
@@ -273,7 +362,7 @@ mod tests {
             ..Default::default()
         };
         for _ in 0..128 {
-            s = step(&s, &cmd(1, 0), true);
+            s = step(&s, &cmd(1, 0), true, 1.0);
         }
         assert!((s.pos.z - (19.0 + PLAYER_HALF_WIDTH)).abs() < 1e-4);
     }
@@ -286,18 +375,18 @@ mod tests {
             ..Default::default()
         };
         let mut apex = 0.0f32;
-        s = step(&s, &cmd(0, Buttons::JUMP), true);
+        s = step(&s, &cmd(0, Buttons::JUMP), true, 1.0);
         for _ in 0..64 {
-            s = step(&s, &cmd(0, 0), true);
+            s = step(&s, &cmd(0, 0), true, 1.0);
             apex = apex.max(s.pos.y);
         }
         assert!(apex > 1.2 && apex < 1.5, "apex {apex}");
     }
 
-    fn run(s: &mut MoveState, ticks: usize, buttons: u8) -> f32 {
+    fn run(s: &mut MoveState, ticks: usize, buttons: u16) -> f32 {
         let mut top = 0.0f32;
         for _ in 0..ticks {
-            *s = step(s, &cmd(1, buttons), true);
+            *s = step(s, &cmd(1, buttons), true, 1.0);
             top = top.max(s.horizontal_speed());
         }
         top
@@ -327,25 +416,93 @@ mod tests {
         let mut s = open_ground();
         run(&mut s, 64, Buttons::SPRINT);
         let before = s.horizontal_speed();
-        s = step(&s, &cmd(1, Buttons::SPRINT | Buttons::SLIDE), true);
+        s = step(&s, &cmd(1, Buttons::SPRINT | Buttons::CROUCH), true, 1.0);
         assert!(s.sliding());
-        assert!(s.horizontal_speed() > before + SLIDE_BOOST * 0.8, "boost {}", s.horizontal_speed());
+        assert!(
+            s.horizontal_speed() > before + SLIDE_BOOST * 0.8,
+            "boost {}",
+            s.horizontal_speed()
+        );
         assert_eq!(s.eye_height(), SLIDE_EYE_HEIGHT);
         // Holding the button: slide lasts SLIDE_TIME, then you stand up.
-        run(&mut s, (SLIDE_TIME / DT) as usize + 2, Buttons::SPRINT | Buttons::SLIDE);
+        run(
+            &mut s,
+            (SLIDE_TIME / DT) as usize + 2,
+            Buttons::SPRINT | Buttons::CROUCH,
+        );
         assert!(!s.sliding());
         // A fresh press while still on cooldown does nothing.
         assert!(s.slide_cooldown > 0.0);
-        s = step(&s, &cmd(1, Buttons::SPRINT), true);
-        s = step(&s, &cmd(1, Buttons::SPRINT | Buttons::SLIDE), true);
+        s = step(&s, &cmd(1, Buttons::SPRINT), true, 1.0);
+        s = step(&s, &cmd(1, Buttons::SPRINT | Buttons::CROUCH), true, 1.0);
         assert!(!s.sliding());
     }
 
     #[test]
     fn slide_needs_speed() {
         let mut s = open_ground();
-        s = step(&s, &cmd(0, Buttons::SLIDE), true);
+        s = step(&s, &cmd(0, Buttons::CROUCH), true, 1.0);
         assert!(!s.sliding());
+    }
+
+    #[test]
+    fn crouch_is_slow_and_needs_headroom_to_stand() {
+        let mut s = open_ground();
+        let top = run(&mut s, 96, Buttons::CROUCH);
+        assert!(s.crouched);
+        assert!(
+            (top - MAX_SPEED * CROUCH_SPEED_FACTOR).abs() < 0.05,
+            "crouch {top}"
+        );
+        assert_eq!(s.eye_height(), CROUCH_EYE_HEIGHT);
+        s = step(&s, &cmd(0, 0), true, 1.0);
+        assert!(!s.crouched, "stands up in the open");
+    }
+
+    #[test]
+    fn walks_up_stairs_onto_the_platform() {
+        // South of the site B stairs, walking toward -Z.
+        let mut s = MoveState {
+            pos: Vec3::new(21.5, 0.0, -20.0),
+            on_ground: true,
+            ..Default::default()
+        };
+        for _ in 0..200 {
+            s = step(&s, &cmd(1, 0), true, 1.0);
+            if s.pos.z < -25.0 {
+                break;
+            }
+        }
+        assert!(s.on_ground);
+        assert_eq!(s.pos.y, 1.0, "on the platform at z {}", s.pos.z);
+    }
+
+    #[test]
+    fn walks_up_and_down_a_ramp() {
+        let mut s = MoveState {
+            pos: Vec3::new(-27.0, 0.0, -3.0),
+            on_ground: true,
+            ..Default::default()
+        };
+        for _ in 0..96 {
+            s = step(&s, &cmd(1, 0), true, 1.0);
+            assert!(
+                s.on_ground || s.pos.y > 0.9,
+                "stays grounded on the ramp at {:?}",
+                s.pos
+            );
+        }
+        assert_eq!(s.pos.y, 1.0);
+        // Turn around and walk back down without leaving the ground.
+        let back = |f| InputCmd {
+            yaw: core::f32::consts::PI,
+            ..cmd(f, 0)
+        };
+        for _ in 0..96 {
+            s = step(&s, &back(1), true, 1.0);
+            assert!(s.on_ground, "airborne going down at {:?}", s.pos);
+        }
+        assert_eq!(s.pos.y, 0.0);
     }
 
     #[test]
@@ -356,7 +513,7 @@ mod tests {
             ..Default::default()
         };
         for _ in 0..64 {
-            s = step(&s, &cmd(1, Buttons::JUMP), false);
+            s = step(&s, &cmd(1, Buttons::JUMP), false, 1.0);
         }
         assert_eq!(s.pos, Vec3::new(0.0, 0.0, 26.0));
     }

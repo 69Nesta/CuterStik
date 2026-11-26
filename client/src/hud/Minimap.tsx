@@ -5,7 +5,7 @@
 // cone of you or a living teammate with clear line of sight. A spotted
 // enemy leaves a fading "last seen" marker for a moment after.
 import { useEffect, useRef } from 'react'
-import { C, MAP, raycastMap } from '../wasm'
+import { BOMB_SITES, C, MAP, RAMPS, raycastMap } from '../wasm'
 import { SITES, SPAWN_ZONES } from '../game/mapInfo'
 import { useSettings } from '../game/settings'
 import { useHud } from '../game/store'
@@ -56,7 +56,7 @@ function bakeMap(): { canvas: HTMLCanvasElement; bounds: Bounds } {
     const w = bb.max.x - bb.min.x
     const d = bb.max.z - bb.min.z
     ctx.fillStyle =
-      surface === 'Platform'
+      surface === 'Platform' || surface === 'Stairs'
         ? '#3c8f8a'
         : surface === 'Crate'
           ? h > 1.6 ? '#c98a55' : '#8e6844'
@@ -66,6 +66,35 @@ function bakeMap(): { canvas: HTMLCanvasElement; bounds: Bounds } {
     ctx.lineWidth = 0.15
     ctx.strokeRect(x, z, w, d)
   }
+  // Ramps: shaded from low (dark) to high (light) end.
+  for (const { bounds: bb, rise } of RAMPS) {
+    const w = bb.max.x - bb.min.x
+    const d = bb.max.z - bb.min.z
+    const [x0, z0, x1, z1] =
+      rise === 'PosX' ? [bb.min.x, 0, bb.max.x, 0]
+        : rise === 'NegX' ? [bb.max.x, 0, bb.min.x, 0]
+          : rise === 'PosZ' ? [0, bb.min.z, 0, bb.max.z]
+            : [0, bb.max.z, 0, bb.min.z]
+    const grad = ctx.createLinearGradient(x0, z0, x1, z1)
+    grad.addColorStop(0, '#2c5f5c')
+    grad.addColorStop(1, '#5fb3ad')
+    ctx.fillStyle = grad
+    ctx.fillRect(bb.min.x, bb.min.z, w, d)
+    ctx.strokeStyle = 'rgba(20, 16, 12, 0.55)'
+    ctx.lineWidth = 0.15
+    ctx.strokeRect(bb.min.x, bb.min.z, w, d)
+  }
+
+  // Bomb plant zones.
+  ctx.setLineDash([0.6, 0.5])
+  ctx.lineWidth = 0.18
+  ctx.strokeStyle = 'rgba(255, 155, 47, 0.75)'
+  for (const site of BOMB_SITES) {
+    ctx.beginPath()
+    ctx.arc(site.x, site.z, site.radius, 0, Math.PI * 2)
+    ctx.stroke()
+  }
+  ctx.setLineDash([])
   return { canvas, bounds }
 }
 
@@ -84,14 +113,14 @@ function updateSpotting(seen: Map<PlayerId, Seen>, now: number) {
 
   for (const enemy of snap.players) {
     if (enemy.id === world.myId || !enemy.alive || (!ffa && enemy.team === myTeam)) continue
-    const target = sample(enemy.id) ?? { ...enemy.pos }
+    const target = sample(enemy.id) ?? { ...enemy.mv.pos }
     const tx = target.x
     const ty = target.y + C.head_start * 0.85
     const tz = target.z
     const spotted = spotters.some((s) => {
-      const ex = s.pos.x
-      const ey = s.pos.y + C.eye_height
-      const ez = s.pos.z
+      const ex = s.mv.pos.x
+      const ey = s.mv.pos.y + (s.mv.crouched ? C.crouch_eye_height : C.eye_height)
+      const ez = s.mv.pos.z
       const dx = tx - ex
       const dy = ty - ey
       const dz = tz - ez
@@ -222,9 +251,25 @@ export function Minimap() {
       if (snap && !ffa) {
         for (const p of snap.players) {
           if (p.id === world.myId || p.team !== hud.myTeam || !p.alive) continue
-          const s = sample(p.id) ?? { x: p.pos.x, z: p.pos.z, yaw: p.yaw }
+          const s = sample(p.id) ?? { x: p.mv.pos.x, z: p.mv.pos.z, yaw: p.yaw }
           const [x, y] = toScreen(s.x, s.z)
           drawPlayer(ctx, x, y, screenAngle(s.yaw), TEAM_COLOR[p.team], 1)
+        }
+      }
+
+      // The bomb: attackers always know where it is; once planted, everyone.
+      const bomb = snap?.bomb
+      if (bomb && typeof bomb === 'object') {
+        let at: { x: number; z: number } | null = null
+        if ('Planted' in bomb) at = bomb.Planted.pos
+        else if ('Dropped' in bomb && hud.myTeam === 'T') at = bomb.Dropped.pos
+        else if ('Carried' in bomb && hud.myTeam === 'T' && bomb.Carried.by !== world.myId) {
+          at = sample(bomb.Carried.by)
+        }
+        if (at) {
+          const [x, y] = toScreen(at.x, at.z)
+          const blink = 'Planted' in bomb ? Math.sin(now / 120) > 0 : true
+          drawBomb(ctx, x, y, blink)
         }
       }
 
@@ -331,6 +376,19 @@ function drawLastSeen(ctx: CanvasRenderingContext2D, x: number, y: number, color
   ctx.beginPath()
   ctx.arc(x, y, 7, 0, Math.PI * 2)
   ctx.globalAlpha = alpha * 0.4
+  ctx.stroke()
+  ctx.restore()
+}
+
+function drawBomb(ctx: CanvasRenderingContext2D, x: number, y: number, lit: boolean) {
+  ctx.save()
+  ctx.translate(x, y + 10)
+  ctx.fillStyle = lit ? '#ff3b30' : '#7a1f1a'
+  ctx.strokeStyle = 'rgba(15, 18, 24, 0.95)'
+  ctx.lineWidth = 1.5
+  ctx.beginPath()
+  ctx.roundRect(-5, -4, 10, 8, 2)
+  ctx.fill()
   ctx.stroke()
   ctx.restore()
 }

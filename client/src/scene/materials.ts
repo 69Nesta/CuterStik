@@ -2,7 +2,7 @@
 // textures (see textures.ts) on soft PBR materials, lit by a warm sun with
 // cool sky fill. No ink outlines; shapes read through value and color.
 import * as THREE from 'three'
-import type { Surface, Team } from '../net/protocol'
+import type { Ramp, Surface, Team } from '../net/protocol'
 import {
   capTexture,
   crateTexture,
@@ -43,6 +43,7 @@ const SPEC: Record<Surface, SurfaceSpec> = {
   Wall: { side: { mode: 'world', tileU: 8, tileV: 8 }, top: { mode: 'world', tileU: 2, tileV: 2 } },
   Crate: { side: { mode: 'fit', tileU: 1, tileV: 1 }, top: { mode: 'fit', tileU: 1, tileV: 1 } },
   Platform: { side: { mode: 'fit', tileU: 1, tileV: 1 }, top: { mode: 'fit', tileU: 1, tileV: 1 } },
+  Stairs: { side: { mode: 'world', tileU: 1, tileV: 1 }, top: { mode: 'fit', tileU: 1, tileV: 1 } },
 }
 
 /** BoxGeometry face order: +x, -x, +y, -y, +z, -z. */
@@ -98,6 +99,28 @@ export function surfaceGeometry(min: THREE.Vector3Like, max: THREE.Vector3Like, 
   return geo
 }
 
+/**
+ * Wedge for a ramp: a box whose top edge at the low end is pulled down to
+ * the floor. Textured like stairs (tread on the slope).
+ */
+export function rampGeometry(ramp: Ramp) {
+  const { min, max } = ramp.bounds
+  const geo = surfaceGeometry(min, max, 'Stairs')
+  const pos = geo.attributes.position as THREE.BufferAttribute
+  const half = { x: (max.x - min.x) / 2, y: (max.y - min.y) / 2, z: (max.z - min.z) / 2 }
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getY(i) < half.y - 1e-4) continue
+    const low =
+      ramp.rise === 'PosX' ? pos.getX(i) < 0
+        : ramp.rise === 'NegX' ? pos.getX(i) > 0
+          : ramp.rise === 'PosZ' ? pos.getZ(i) < 0
+            : pos.getZ(i) > 0
+    if (low) pos.setY(i, -half.y)
+  }
+  geo.computeVertexNormals()
+  return geo
+}
+
 function painted(tex: PaintedTexture, params: THREE.MeshStandardMaterialParameters = {}) {
   return new THREE.MeshStandardMaterial({
     map: tex.map,
@@ -129,6 +152,7 @@ export function getSurfaceMaterials() {
     Wall: faces(wall, cap),
     Crate: faces(crate, crate),
     Platform: faces(panel, tread),
+    Stairs: faces(panel, tread),
   }
   return surfaceMaterials
 }

@@ -3,8 +3,8 @@
 // purely visual, so they never disagree with collision.
 import { useMemo } from 'react'
 import * as THREE from 'three'
-import { MAP } from '../wasm'
-import { getSurfaceMaterials, surfaceGeometry } from './materials'
+import { MAP, RAMPS } from '../wasm'
+import { getSurfaceMaterials, rampGeometry, surfaceGeometry } from './materials'
 import { stencilTexture } from './textures'
 import { SITES } from '../game/mapInfo'
 
@@ -60,9 +60,30 @@ export function GameMap() {
       }),
     [],
   )
+  const ramps = useMemo(
+    () =>
+      RAMPS.map((r) => {
+        const { min, max } = r.bounds
+        return {
+          geometry: rampGeometry(r),
+          position: [(min.x + max.x) / 2, (min.y + max.y) / 2, (min.z + max.z) / 2] as const,
+        }
+      }),
+    [],
+  )
 
   return (
     <group>
+      {ramps.map((r, i) => (
+        <mesh
+          key={`ramp${i}`}
+          geometry={r.geometry}
+          material={materials.Stairs}
+          position={r.position}
+          castShadow
+          receiveShadow
+        />
+      ))}
       {boxes.map((b, i) => (
         <mesh
           key={i}

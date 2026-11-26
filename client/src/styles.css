@@ -639,3 +639,103 @@ input::placeholder { color: #9aa1b2; }
     linear-gradient(to bottom, #8fb8e0 0 45%, #e9dcc6 45% 60%, #a39684 60%);
 }
 .lobby-loadout .settings-open { align-self: flex-start; }
+
+/* --- Weapons, money, armor --------------------------------------------- */
+.vitals-left { position: absolute; left: 28px; bottom: 22px; }
+.vitals-left .vitals-row { display: flex; gap: 26px; align-items: baseline; }
+.vitals-left .vitals { position: static; }
+.vitals.armor .icon { color: var(--ct); }
+.vitals-left .money {
+  position: absolute;
+  left: 0;
+  bottom: 104px;
+  font: 400 26px var(--display);
+  color: var(--good);
+  -webkit-text-stroke: 0.14em var(--ink);
+  paint-order: stroke fill;
+  text-shadow: 0 4px 0 var(--ink);
+}
+.vitals .weapon-name {
+  align-self: center;
+  font: 800 15px var(--body);
+  color: var(--paper);
+  -webkit-text-stroke: 0;
+  text-shadow: none;
+  background: rgba(29, 33, 48, 0.7);
+  border-radius: 6px;
+  padding: 2px 8px;
+}
+
+/* --- Bomb ----------------------------------------------------------------- */
+.topbar .clock.bomb { background: #ffe1dd; }
+.topbar .clock.bomb .time { color: var(--bad); animation: bomb-pulse 1s infinite; }
+.topbar .clock.bomb .phase { color: #b3261e; }
+@keyframes bomb-pulse { 50% { opacity: 0.55; } }
+
+.bomb-status {
+  position: absolute;
+  bottom: 170px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  font-weight: 800;
+  background: var(--paper);
+  border: var(--line);
+  border-radius: 12px;
+  box-shadow: var(--drop);
+}
+.bomb-status .bomb-icon { color: var(--bad); font-size: 12px; margin-right: 6px; }
+.bomb-status .track {
+  width: 220px;
+  height: 10px;
+  border: 2px solid var(--ink);
+  border-radius: 6px;
+  overflow: hidden;
+  background: var(--paper-2);
+}
+.bomb-status .fill { height: 100%; background: var(--dev); transform-origin: left; }
+
+/* --- Buy menu ------------------------------------------------------------- */
+.buy-menu {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  background: rgba(29, 33, 48, 0.25);
+  pointer-events: auto;
+}
+.buy-menu .card { width: min(620px, 92vw); }
+.buy-menu header { display: flex; justify-content: space-between; align-items: baseline; }
+.buy-menu h2 { font: 400 30px var(--display); }
+.buy-menu header .money { font: 400 24px var(--display); color: #1f9d5b; }
+.buy-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.card button.buy-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'key name price' 'key stats stats';
+  column-gap: 10px;
+  row-gap: 2px;
+  align-items: center;
+  text-align: left;
+  padding: 10px 12px;
+}
+.buy-item kbd { grid-area: key; }
+.buy-item .name { grid-area: name; font-weight: 800; }
+.buy-item .price { grid-area: price; font-weight: 800; color: #1f9d5b; }
+.buy-item .stats { grid-area: stats; font-size: 12px; font-weight: 500; color: var(--ink-soft); }
+.card button.buy-item:disabled { opacity: 0.45; cursor: not-allowed; }
+.buy-menu .hint { text-align: center; }
+
+/* --- Sniper scope ------------------------------------------------------- */
+.scope {
+  position: absolute;
+  inset: 0;
+  background: radial-gradient(circle at center, transparent 0 34vmin, rgba(0, 0, 0, 0.92) 34.4vmin);
+}
+.scope i { position: absolute; background: rgba(0, 0, 0, 0.85); }
+.scope .h { left: 0; right: 0; top: 50%; height: 2px; transform: translateY(-1px); }
+.scope .v { top: 0; bottom: 0; left: 50%; width: 2px; transform: translateX(-1px); }

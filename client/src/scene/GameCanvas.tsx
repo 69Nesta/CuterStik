@@ -1,5 +1,6 @@
 import { Canvas } from '@react-three/fiber'
 import * as THREE from 'three'
+import { Bomb } from './Bomb'
 import { Effects } from './Effects'
 import { GameMap } from './GameMap'
 import { LocalPlayer } from './LocalPlayer'
@@ -54,6 +55,7 @@ export function GameCanvas() {
       />
       <GameMap />
       <RemotePlayers />
+      <Bomb />
       <Effects />
       <LocalPlayer />
       <ViewModel />

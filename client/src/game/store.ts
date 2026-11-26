@@ -1,7 +1,7 @@
 // React-facing UI state (HUD, menus). Per-frame game data lives in
 // `world.ts` instead so the 64 Hz network stream doesn't re-render React.
 import { create } from 'zustand'
-import type { GameMode, PlayerId, RoomId, Team } from '../net/protocol'
+import type { GameMode, PlayerId, RoomId, Team, WeaponId } from '../net/protocol'
 
 export type KillfeedEntry = {
   key: number
@@ -10,8 +10,17 @@ export type KillfeedEntry = {
   victim: string
   victimTeam?: Team
   headshot: boolean
+  /** Weapon name, or null for the bomb. */
+  weapon: string | null
   at: number
 }
+
+/** What the local player's bomb HUD shows. */
+export type BombHud =
+  | { kind: 'none' }
+  | { kind: 'carrying'; inSite: boolean; planting: number }
+  | { kind: 'dropped' }
+  | { kind: 'planted'; site: string; left: number; defusing: number; defusingMe: boolean }
 
 export type ScoreRow = {
   id: PlayerId
@@ -37,8 +46,16 @@ export type HudState = {
   myId: PlayerId | null
   myTeam: Team | null
   health: number
+  armor: number
+  helmet: boolean
+  money: number
+  weapon: WeaponId
   ammo: number
+  reserve: number
   reloading: boolean
+  zoomed: boolean
+  canBuy: boolean
+  bomb: BombHud
   alive: boolean
   spawned: boolean
 
@@ -61,6 +78,7 @@ export type HudState = {
   locked: boolean
   showScores: boolean
   settingsOpen: boolean
+  buyOpen: boolean
 }
 
 export const useHud = create<HudState>(() => ({
@@ -74,8 +92,16 @@ export const useHud = create<HudState>(() => ({
   myId: null,
   myTeam: null,
   health: 100,
-  ammo: 30,
+  armor: 0,
+  helmet: false,
+  money: 0,
+  weapon: 'Pistol',
+  ammo: 0,
+  reserve: 0,
   reloading: false,
+  zoomed: false,
+  canBuy: false,
+  bomb: { kind: 'none' },
   alive: false,
   spawned: false,
 
@@ -97,6 +123,7 @@ export const useHud = create<HudState>(() => ({
   locked: false,
   showScores: false,
   settingsOpen: false,
+  buyOpen: false,
 }))
 
 /** setState that skips the update when nothing actually changed. */
@@ -104,7 +131,12 @@ export function patchHud(partial: Partial<HudState>) {
   const state = useHud.getState()
   for (const key in partial) {
     const k = key as keyof HudState
-    if (!Object.is(state[k], partial[k])) {
+    const a = state[k]
+    const b = partial[k]
+    const same =
+      Object.is(a, b) ||
+      (typeof a === 'object' && typeof b === 'object' && JSON.stringify(a) === JSON.stringify(b))
+    if (!same) {
       useHud.setState(partial)
       return
     }

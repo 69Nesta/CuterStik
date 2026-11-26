@@ -24,8 +24,9 @@ export function CrosshairShape({ style: override, hit }: Props) {
     }
     let raf = 0
     const tick = () => {
-      const speed = world.sim?.horizontal_speed() ?? 0
-      const spread = Math.min(10, speed * 0.6 + world.recoil * 8)
+      // Follows the real inaccuracy cone of the weapon in hand.
+      const cone = world.sim?.inaccuracy() ?? 0
+      const spread = Math.min(16, cone * 220 + world.recoil * 6)
       root.current?.style.setProperty('--spread', `${spread.toFixed(1)}px`)
       raf = requestAnimationFrame(tick)
     }

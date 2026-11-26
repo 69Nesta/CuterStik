@@ -74,14 +74,16 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
     while let Some(Ok(msg)) = stream.next().await {
         match msg {
             Message::Binary(bytes) => {
-                let Ok(ClientMsg::Input(cmd)) = protocol::decode::<ClientMsg>(&bytes) else {
-                    continue;
+                let cmd = match protocol::decode::<ClientMsg>(&bytes) {
+                    Ok(ClientMsg::Input(cmd)) => match sanitize_input(cmd) {
+                        Some(cmd) => RoomCmd::Input { id, cmd },
+                        None => continue,
+                    },
+                    Ok(ClientMsg::Buy(item)) => RoomCmd::Buy { id, item },
+                    _ => continue,
                 };
-                let Some(cmd) = sanitize_input(cmd) else { continue };
-                // Drop the input if the room is backed up; stop if it's gone.
-                if let Err(mpsc::error::TrySendError::Closed(_)) =
-                    room.try_send(RoomCmd::Input { id, cmd })
-                {
+                // Drop the message if the room is backed up; stop if it's gone.
+                if let Err(mpsc::error::TrySendError::Closed(_)) = room.try_send(cmd) {
                     break;
                 }
             }
@@ -96,7 +98,9 @@ async fn handle_socket(socket: WebSocket, state: AppState) {
 
 async fn read_hello(stream: &mut SplitStream<WebSocket>) -> Result<Hello, String> {
     while let Some(Ok(msg)) = stream.next().await {
-        let Message::Binary(bytes) = msg else { continue };
+        let Message::Binary(bytes) = msg else {
+            continue;
+        };
         return match protocol::decode::<ClientMsg>(&bytes) {
             Ok(ClientMsg::Hello {
                 version,

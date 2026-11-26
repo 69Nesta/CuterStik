@@ -104,6 +104,9 @@ function General() {
       <Row label="Invert vertical look">
         <Toggle value={s.invertY} onChange={(v) => setSetting('invertY', v)} />
       </Row>
+      <Row label="Volume" hint="Gunshots, footsteps, bomb and UI sounds">
+        <Slider value={s.volume} min={0} max={1} step={0.05} onChange={(v) => setSetting('volume', v)} format={(v) => `${Math.round(v * 100)}%`} />
+      </Row>
       <Row label="Performance overlay" hint="Graph adds frame times, ping and net stats">
         <Segmented<PerfMode>
           value={s.perf}

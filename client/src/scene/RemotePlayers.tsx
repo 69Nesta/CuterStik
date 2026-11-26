@@ -6,12 +6,15 @@ import { useRef, useState } from 'react'
 import * as THREE from 'three'
 import { C } from '../wasm'
 import { useHud } from '../game/store'
-import { world } from '../game/world'
+import { INTERP_DELAY_MS, world } from '../game/world'
 import { playerName } from '../net/session'
-import type { PlayerId, PlayerSnap, Team } from '../net/protocol'
+import type { PlayerId, PlayerSnap, Team, WeaponId } from '../net/protocol'
+import { sfx } from '../game/audio'
 import { Mannequin, type Pose } from './Mannequin'
 
-const INTERP_DELAY_MS = 100
+/** Meters between footsteps; below this speed players move silently. */
+const STRIDE = 2.3
+const QUIET_SPEED = 3.6
 
 type Sample = { x: number; y: number; z: number; yaw: number; pitch: number; snap: PlayerSnap }
 
@@ -43,9 +46,9 @@ export function sample(id: PlayerId): Sample | null {
       ? THREE.MathUtils.clamp((renderMs - a.serverMs) / span, 0, 1)
       : 1
   return {
-    x: pa.pos.x + (pb.pos.x - pa.pos.x) * t,
-    y: pa.pos.y + (pb.pos.y - pa.pos.y) * t,
-    z: pa.pos.z + (pb.pos.z - pa.pos.z) * t,
+    x: pa.mv.pos.x + (pb.mv.pos.x - pa.mv.pos.x) * t,
+    y: pa.mv.pos.y + (pb.mv.pos.y - pa.mv.pos.y) * t,
+    z: pa.mv.pos.z + (pb.mv.pos.z - pa.mv.pos.z) * t,
     yaw: lerpAngle(pa.yaw, pb.yaw, t),
     pitch: pa.pitch + (pb.pitch - pa.pitch) * t,
     snap: pb,
@@ -55,8 +58,11 @@ export function sample(id: PlayerId): Sample | null {
 function RemotePlayer({ id }: { id: PlayerId }) {
   const root = useRef<THREE.Group>(null)
   const label = useRef<HTMLDivElement>(null)
-  const pose = useRef<Pose>({ speed: 0, pitch: 0, onGround: true, sliding: false })
+  const pose = useRef<Pose>({ speed: 0, pitch: 0, onGround: true, sliding: false, crouched: false })
   const [team, setTeam] = useState<Team | null>(null)
+  const [weapon, setWeapon] = useState<WeaponId>('Rifle')
+  const [bomb, setBomb] = useState(false)
+  const steps = useRef({ dist: 0, x: 0, z: 0, wasGrounded: true, init: false })
   const myTeam = useHud((s) => s.myTeam)
   const ffa = useHud((s) => s.room?.mode === 'Deathmatch')
 
@@ -66,17 +72,40 @@ function RemotePlayer({ id }: { id: PlayerId }) {
     if (!g) return
     if (!s || !s.snap.alive) {
       g.visible = false
+      steps.current.init = false
       return
     }
     g.visible = true
     g.position.set(s.x, s.y, s.z)
     g.rotation.y = s.yaw
-    const v = s.snap.vel
-    pose.current.speed = Math.hypot(v.x, v.z)
+    const mv = s.snap.mv
+    const speed = Math.hypot(mv.vel.x, mv.vel.z)
+    pose.current.speed = speed
     pose.current.pitch = s.pitch
-    pose.current.onGround = s.snap.on_ground
-    pose.current.sliding = s.snap.slide > 0
+    pose.current.onGround = mv.on_ground
+    pose.current.sliding = mv.slide > 0
+    pose.current.crouched = mv.crouched
     if (s.snap.team !== team) setTeam(s.snap.team)
+    if (s.snap.weapon !== weapon) setWeapon(s.snap.weapon)
+    const b = world.latest?.bomb
+    const carrying = typeof b === 'object' && 'Carried' in b && b.Carried.by === id
+    if (carrying !== bomb) setBomb(carrying)
+
+    // Footsteps: only running on the ground makes noise.
+    const st = steps.current
+    if (!st.init) Object.assign(st, { init: true, x: s.x, z: s.z, dist: 0, wasGrounded: mv.on_ground })
+    const at = { x: s.x, y: s.y, z: s.z }
+    if (mv.on_ground && !st.wasGrounded) sfx.land(at)
+    st.wasGrounded = mv.on_ground
+    if (mv.on_ground && speed >= QUIET_SPEED && !mv.crouched) {
+      st.dist += Math.hypot(s.x - st.x, s.z - st.z)
+      if (st.dist > STRIDE) {
+        st.dist = 0
+        sfx.footstep(at)
+      }
+    }
+    st.x = s.x
+    st.z = s.z
     if (label.current) {
       label.current.textContent = playerName(id)
       label.current.style.display = !ffa && s.snap.team === myTeam ? 'block' : 'none'
@@ -85,7 +114,7 @@ function RemotePlayer({ id }: { id: PlayerId }) {
 
   return (
     <group ref={root} visible={false}>
-      <Mannequin look={ffa ? 'ffa' : team} pose={pose} />
+      <Mannequin look={ffa ? 'ffa' : team} pose={pose} weapon={weapon} bomb={bomb} />
       <Html position={[0, C.player_height + 0.35, 0]} center zIndexRange={[10, 0]}>
         <div ref={label} className={`nameplate ${team === 'T' ? 'team-t' : 'team-ct'}`} />
       </Html>
